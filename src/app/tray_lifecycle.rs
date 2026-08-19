@@ -153,7 +153,7 @@ impl LibraryApp {
         }
         if self.pending_open_compact {
             self.pending_open_compact = false;
-            self.open_compact_level_dialog(window, cx);
+            self.open_compact_flow(window, cx);
         }
     }
 }

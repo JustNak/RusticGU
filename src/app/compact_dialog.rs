@@ -1,6 +1,6 @@
-//! Low / Medium / High compact dialog. No Switch — library Switch panics here.
+//! Change-method and Decompress dialogs. Compress uses the cinematic theater.
 //!
-//! One ~480px dialog. Radio-cards show Low / Medium / High only — no XPRESS/LZX.
+//! One ~480px dialog. Radio-cards show Low / Medium / High / Maximum — no XPRESS/LZX.
 
 use gpui::{
     div, prelude::FluentBuilder, px, AppContext, Context, InteractiveElement, IntoElement,
@@ -192,24 +192,6 @@ impl Render for CompactLevelPicker {
 }
 
 impl LibraryApp {
-    pub(crate) fn open_compact_level_dialog(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_compact_picker(CompactPickerMode::Compress, window, cx);
-    }
-
-    pub(crate) fn begin_title_compress(
-        &mut self,
-        id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.select_game(id, cx);
-        self.open_compact_picker(CompactPickerMode::Compress, window, cx);
-    }
-
     pub(crate) fn begin_title_change_method(
         &mut self,
         id: String,
@@ -412,6 +394,15 @@ mod tests {
         assert_eq!(
             CompactPickerMode::ChangeMethod.heading(&one),
             "Change compression for Apex Legends."
+        );
+        assert_eq!(CompactLevel::ALL.len(), 4);
+        assert_eq!(
+            CompactLevel::High.algorithm(),
+            crate::settings::CompactAlgorithm::Xpress16k
+        );
+        assert_eq!(
+            CompactLevel::Maximum.algorithm(),
+            crate::settings::CompactAlgorithm::Lzx
         );
     }
 

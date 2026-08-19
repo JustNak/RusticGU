@@ -20,7 +20,8 @@ pub use command::{
 #[allow(unused_imports)]
 pub use engine::{
     apply_compact, apply_compact_allowing_lzx, apply_incremental, estimate_compact,
-    estimate_compact_with, preflight, CompactEstimate, CompactProgress, CompactRefuse,
+    estimate_compact_with, measure_compact_sizes, preflight, CompactEstimate, CompactProgress,
+    CompactRefuse, CompactSizeSnapshot,
 };
 #[allow(unused_imports)]
 pub use engine::{

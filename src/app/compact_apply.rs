@@ -1,14 +1,22 @@
-//! Multi-title compact apply. Dialog High uses LZX for this action only.
+//! Multi-title compact apply. Flow Maximum uses LZX for this action only.
 
 use gpui::{Context, Window};
 
+use super::compact_flow::{CompactFlowPhase, TitleCompactStats};
 use super::LibraryApp;
 use crate::compact::{
     apply_compact, apply_compact_allowing_lzx, decide_compact_apply, estimate_compact,
-    CompactApplyDecision, CompactLevel, CompactOp, CompactProgress,
+    measure_compact_sizes, CompactApplyDecision, CompactLevel, CompactOp, CompactProgress,
 };
 use crate::library::{title_is_compact_excluded, LibraryTitle};
 use crate::notifications::notify_compact;
+
+enum CompactJobMsg {
+    Progress(CompactProgress),
+    Stats(TitleCompactStats),
+    Finished { ok_n: usize, fail_n: usize },
+    Error(String),
+}
 
 impl LibraryApp {
     pub(crate) fn apply_compact_level(
@@ -17,13 +25,13 @@ impl LibraryApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.apply_compact_jobs(
-            self.selected_titles(),
-            CompactOp::Compress,
-            Some(level),
-            window,
-            cx,
-        );
+        let titles = self
+            .compact_flow
+            .as_ref()
+            .map(|flow| flow.titles.clone())
+            .filter(|titles| !titles.is_empty())
+            .unwrap_or_else(|| self.selected_titles());
+        self.apply_compact_jobs(titles, CompactOp::Compress, Some(level), window, cx);
     }
 
     pub(crate) fn apply_compact_jobs(
@@ -73,6 +81,7 @@ impl LibraryApp {
                 &title.install_path,
                 self.settings.compact_algorithm.for_live_library(),
             ) {
+                self.dismiss_compact_flow_now(cx);
                 self.open_dstorage_warning(window, cx, estimate);
             } else {
                 self.show_error_toast(
@@ -113,6 +122,23 @@ impl LibraryApp {
         };
         let allow_lzx = matches!(level, Some(level) if level.allows_lzx())
             || algorithm == crate::settings::CompactAlgorithm::Lzx;
+        let capture_stats = matches!(op, CompactOp::Compress);
+
+        if let Some(flow) = self.compact_flow.as_mut() {
+            flow.phase = CompactFlowPhase::Working;
+            if let Some(level) = level {
+                flow.selected_level = level;
+            }
+            flow.progress = Some(CompactProgress {
+                processed: 0,
+                total: runnable.len().max(1),
+                message: "Starting…".into(),
+            });
+            flow.stats.clear();
+            flow.failed = false;
+            flow.finish_message.clear();
+            flow.anim_gen = flow.anim_gen.saturating_add(1);
+        }
 
         self.compact_busy = true;
         self.live.set_compact_busy(true);
@@ -125,16 +151,17 @@ impl LibraryApp {
 
         let total = runnable.len();
         let names: Vec<String> = runnable.iter().map(|t| t.name.clone()).collect();
-        let (tx, rx) = async_channel::unbounded::<Result<CompactProgress, String>>();
+        let (tx, rx) = async_channel::unbounded::<CompactJobMsg>();
         std::thread::spawn(move || {
             let mut ok_n = 0usize;
             let mut fail_n = 0usize;
             for (i, title) in runnable.into_iter().enumerate() {
-                let _ = tx.send_blocking(Ok(CompactProgress {
+                let _ = tx.send_blocking(CompactJobMsg::Progress(CompactProgress {
                     processed: i,
                     total,
                     message: format!("{} ({}/{})…", title.name, i + 1, total),
                 }));
+                let before = capture_stats.then(|| measure_compact_sizes(&title.install_path));
                 let result = if allow_lzx {
                     apply_compact_allowing_lzx(
                         op,
@@ -142,7 +169,7 @@ impl LibraryApp {
                         algorithm,
                         allow,
                         |progress| {
-                            let _ = tx.send_blocking(Ok(CompactProgress {
+                            let _ = tx.send_blocking(CompactJobMsg::Progress(CompactProgress {
                                 processed: i,
                                 total,
                                 message: format!("{}: {}", title.name, progress.message),
@@ -151,7 +178,7 @@ impl LibraryApp {
                     )
                 } else {
                     apply_compact(op, &title.install_path, algorithm, allow, |progress| {
-                        let _ = tx.send_blocking(Ok(CompactProgress {
+                        let _ = tx.send_blocking(CompactJobMsg::Progress(CompactProgress {
                             processed: i,
                             total,
                             message: format!("{}: {}", title.name, progress.message),
@@ -159,22 +186,26 @@ impl LibraryApp {
                     })
                 };
                 match result {
-                    Ok(_) => ok_n += 1,
+                    Ok(_) => {
+                        ok_n += 1;
+                        if let Some(before) = before {
+                            let after = measure_compact_sizes(&title.install_path);
+                            let _ = tx.send_blocking(CompactJobMsg::Stats(TitleCompactStats {
+                                id: title.id,
+                                name: title.name,
+                                before,
+                                after,
+                            }));
+                        }
+                    }
                     Err(err) => {
                         fail_n += 1;
-                        let _ = tx.send_blocking(Err(format!("{}: {err}", title.name)));
+                        let _ = tx
+                            .send_blocking(CompactJobMsg::Error(format!("{}: {err}", title.name)));
                     }
                 }
             }
-            let verb = match op {
-                CompactOp::Compress => "Compressed",
-                CompactOp::Uncompress => "Restored",
-            };
-            let _ = tx.send_blocking(Ok(CompactProgress {
-                processed: total,
-                total,
-                message: format!("{verb} {ok_n}/{total} with WOF /EXE. Failed {fail_n}."),
-            }));
+            let _ = tx.send_blocking(CompactJobMsg::Finished { ok_n, fail_n });
         });
 
         let label = if names.len() == 1 {
@@ -185,39 +216,34 @@ impl LibraryApp {
         cx.spawn(async move |this, cx| {
             while let Ok(item) = rx.recv().await {
                 let cont = this.update(cx, |app, cx| match item {
-                    Ok(progress) => {
-                        let finished = progress.processed >= progress.total
-                            && (progress.message.contains("WOF /EXE")
-                                || progress.message.starts_with("Compressed ")
-                                || progress.message.starts_with("Restored "));
+                    CompactJobMsg::Progress(progress) => {
                         app.compact_progress = Some(progress.clone());
-                        if finished {
-                            app.compact_busy = false;
-                            app.live.set_compact_busy(false);
-                            let failed = progress.message.contains("Failed ")
-                                && !progress.message.contains("Failed 0");
-                            if failed {
-                                app.show_error_toast(progress.message.clone(), cx);
-                            } else {
-                                app.show_toast(progress.message.clone(), cx);
-                            }
-                            notify_compact(
-                                app.system_tray.as_ref(),
-                                app.settings.os_notify_mode,
-                                app.window_hidden_to_tray,
-                                crate::branding::APP_NAME,
-                                &format!("{label}: {}", progress.message),
-                                !failed,
-                            );
-                            app.refresh_library(cx);
+                        if let Some(flow) = app.compact_flow.as_mut() {
+                            flow.progress = Some(progress);
                         }
                         cx.notify();
                         true
                     }
-                    Err(err) => {
-                        app.show_error_toast(err, cx);
+                    CompactJobMsg::Stats(stats) => {
+                        if let Some(flow) = app.compact_flow.as_mut() {
+                            flow.stats.push(stats);
+                        }
                         cx.notify();
                         true
+                    }
+                    CompactJobMsg::Error(err) => {
+                        if app.compact_flow.is_none() {
+                            app.show_error_toast(err, cx);
+                        } else if let Some(flow) = app.compact_flow.as_mut() {
+                            flow.failed = true;
+                            flow.finish_message = err;
+                        }
+                        cx.notify();
+                        true
+                    }
+                    CompactJobMsg::Finished { ok_n, fail_n } => {
+                        app.finish_compact_job(op, &label, total, ok_n, fail_n, cx);
+                        false
                     }
                 });
                 if !matches!(cont, Ok(true)) {
@@ -226,5 +252,50 @@ impl LibraryApp {
             }
         })
         .detach();
+    }
+
+    fn finish_compact_job(
+        &mut self,
+        op: CompactOp,
+        label: &str,
+        total: usize,
+        ok_n: usize,
+        fail_n: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.compact_busy = false;
+        self.live.set_compact_busy(false);
+        let verb = match op {
+            CompactOp::Compress => "Compressed",
+            CompactOp::Uncompress => "Restored",
+        };
+        let message = format!("{verb} {ok_n}/{total} with WOF /EXE. Failed {fail_n}.");
+        let failed = fail_n > 0;
+        self.compact_progress = Some(CompactProgress {
+            processed: total,
+            total,
+            message: message.clone(),
+        });
+        if let Some(flow) = self.compact_flow.as_mut() {
+            flow.phase = CompactFlowPhase::Done;
+            flow.failed = failed || flow.failed;
+            flow.finish_message = message.clone();
+            flow.progress = None;
+            flow.anim_gen = flow.anim_gen.saturating_add(1);
+        } else if failed {
+            self.show_error_toast(message.clone(), cx);
+        } else {
+            self.show_toast(message.clone(), cx);
+        }
+        notify_compact(
+            self.system_tray.as_ref(),
+            self.settings.os_notify_mode,
+            self.window_hidden_to_tray,
+            crate::branding::APP_NAME,
+            &format!("{label}: {message}"),
+            !failed,
+        );
+        self.refresh_library(cx);
+        cx.notify();
     }
 }

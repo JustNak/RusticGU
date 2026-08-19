@@ -87,6 +87,20 @@ impl CompactEstimate {
     }
 }
 
+/// Measured logical vs on-disk size of compactable files in an install.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CompactSizeSnapshot {
+    pub logical_bytes: u64,
+    pub on_disk_bytes: u64,
+    pub file_count: usize,
+}
+
+impl CompactSizeSnapshot {
+    pub fn saved_bytes(self) -> u64 {
+        self.logical_bytes.saturating_sub(self.on_disk_bytes)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactProgress {
     pub processed: usize,
@@ -137,7 +151,7 @@ pub fn estimate_compact_with(
     })
 }
 
-fn estimate_ratio(algorithm: CompactAlgorithm) -> f64 {
+pub(crate) fn estimate_ratio(algorithm: CompactAlgorithm) -> f64 {
     match algorithm {
         CompactAlgorithm::Xpress4k => 0.70,
         CompactAlgorithm::Xpress8k => XPRESS8K_RATIO,
@@ -145,6 +159,60 @@ fn estimate_ratio(algorithm: CompactAlgorithm) -> f64 {
         CompactAlgorithm::Xpress => 0.68,
         CompactAlgorithm::Lzx => 0.48,
     }
+}
+
+/// Walk compactable files and sum logical + on-disk bytes (same skip list as apply).
+pub fn measure_compact_sizes(root: &Path) -> CompactSizeSnapshot {
+    let included = collect_included_files(root);
+    let mut logical_bytes = 0u64;
+    let mut on_disk_bytes = 0u64;
+    for path in &included {
+        let Ok(meta) = std::fs::metadata(path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let logical = meta.len();
+        let on_disk = file_on_disk_bytes(path).unwrap_or(logical);
+        logical_bytes = logical_bytes.saturating_add(logical);
+        on_disk_bytes = on_disk_bytes.saturating_add(on_disk);
+    }
+    CompactSizeSnapshot {
+        logical_bytes,
+        on_disk_bytes,
+        file_count: included.len(),
+    }
+}
+
+fn file_on_disk_bytes(path: &Path) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        windows_file_on_disk_bytes(path)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::metadata(path).ok().map(|m| m.len())
+    }
+}
+
+#[cfg(windows)]
+fn windows_file_on_disk_bytes(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetCompressedFileSizeW;
+
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut high = 0u32;
+    let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
+    if low == u32::MAX && high == 0 {
+        return None;
+    }
+    Some(((high as u64) << 32) | u64::from(low))
 }
 
 /// Preflight guards. `allow_dstorage` lets the user override the dstorage.dll warning.
@@ -676,6 +744,14 @@ mod tests {
         assert_eq!(est.file_count, 1);
         assert!(est.skipped_count >= 1);
         assert!(est.estimated_on_disk_bytes <= est.logical_bytes);
+        let snap = measure_compact_sizes(&root);
+        assert_eq!(snap.file_count, 1);
+        assert_eq!(snap.logical_bytes, 1024);
+        assert!(snap.on_disk_bytes > 0);
+        assert_eq!(
+            snap.saved_bytes(),
+            snap.logical_bytes.saturating_sub(snap.on_disk_bytes)
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
