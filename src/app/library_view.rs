@@ -8,17 +8,20 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     tooltip::Tooltip,
-    v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt,
+    v_flex, ActiveTheme, Disableable, Icon, Sizable, StyledExt,
 };
 
-use super::widgets::{empty_state_badge, styled_progress};
+use super::widgets::styled_progress;
 use super::FilterKind;
 use super::LibraryApp;
-use crate::compact::CompactOp;
 use crate::covers::Monogram;
 use crate::format::format_size_pair;
 use crate::library::{title_is_compact_excluded, LibraryTitle};
 use crate::settings::UiDensity;
+
+const POSTER_RADIUS: f32 = 10.0;
+const POSTER_GAP: f32 = 8.0;
+const UNSELECTED_DIM: f32 = 0.6;
 
 impl LibraryApp {
     pub(crate) fn render_library(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -145,7 +148,7 @@ impl LibraryApp {
                             .flex()
                             .flex_row()
                             .flex_wrap()
-                            .gap_4()
+                            .gap(px(POSTER_GAP))
                             .children(games.into_iter().map(|game| {
                                 let id = game.id.clone();
                                 let is_selected = selected.contains(&id);
@@ -178,13 +181,6 @@ impl LibraryApp {
             .items_center()
             .justify_center()
             .gap_3()
-            .child(empty_state_badge(
-                IconName::Inbox,
-                theme.primary,
-                theme.secondary,
-                theme.border,
-                self.settings.reduce_motion,
-            ))
             .child(
                 div()
                     .text_sm()
@@ -192,16 +188,23 @@ impl LibraryApp {
                     .child(if filtered {
                         "No titles match this filter."
                     } else {
-                        "No games found. Install a launcher or refresh."
+                        "No games found."
                     }),
+            )
+            .child(
+                Button::new("library-empty-refresh")
+                    .outline()
+                    .label("Refresh")
+                    .icon(Icon::empty().path("icons/rotate-cw.svg"))
+                    .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
             )
     }
 }
 
 fn poster_size(density: UiDensity) -> (f32, f32) {
     match density {
-        UiDensity::Comfortable => (176.0, 264.0),
-        UiDensity::Compact => (148.0, 222.0),
+        UiDensity::Comfortable => (200.0, 300.0),
+        UiDensity::Compact => (180.0, 270.0),
     }
 }
 
@@ -231,28 +234,26 @@ fn render_poster_card(
     let id = game.id.clone();
     let size = format_size_pair(game.logical_bytes, game.on_disk_bytes);
     let path = game.install_path.display().to_string();
-    let compacted = game.is_compacted();
-    let excluded = title_is_compact_excluded(&game);
-    let badge = game.store.badge();
-    let status = if excluded {
-        "Excluded"
-    } else if compacted {
-        "Compacted"
-    } else {
-        "Inflated"
-    };
-    let tip = format!("{size} — {path}");
-    let show_overlay = chrome.selected || chrome.hovered;
+    let tip = format!("{} — {size} — {path}", game.name);
+    let has_art = cover.is_some();
     let monogram = Monogram::from_title(&game);
+    let badge = game.store.badge();
+    let excluded = title_is_compact_excluded(&game);
     let poster_w = chrome.width;
     let poster_h = chrome.height;
     let selected = chrome.selected;
+    let hovered = chrome.hovered;
     let busy = chrome.busy;
+    let dim = if selected || hovered {
+        1.0
+    } else {
+        UNSELECTED_DIM
+    };
 
     v_flex()
         .id(card_dom_id(&id))
         .w(px(poster_w))
-        .gap_1p5()
+        .opacity(dim)
         .on_hover({
             let id = id.clone();
             cx.listener(move |this, hovering: &bool, _, cx| {
@@ -270,13 +271,13 @@ fn render_poster_card(
                 .relative()
                 .w(px(poster_w))
                 .h(px(poster_h))
-                .rounded(theme.radius_lg)
+                .rounded(px(POSTER_RADIUS))
                 .overflow_hidden()
-                .border_2()
+                .border_1()
                 .border_color(if selected {
                     theme.primary
                 } else {
-                    theme.border.opacity(0.4)
+                    theme.border.opacity(0.28)
                 })
                 .bg(theme.secondary)
                 .cursor_pointer()
@@ -291,12 +292,12 @@ fn render_poster_card(
                         this.select_game_click(id.clone(), multi, cx);
                     })
                 })
-                .child(render_monogram_tile(
-                    &monogram,
-                    badge,
-                    theme.primary,
-                    theme.foreground,
-                ))
+                .child(if has_art {
+                    div().size_full().into_any_element()
+                } else {
+                    render_monogram_tile(&monogram, badge, theme.muted_foreground, theme.foreground)
+                        .into_any_element()
+                })
                 .when_some(cover, |el, image| {
                     el.child(
                         img(image)
@@ -306,57 +307,16 @@ fn render_poster_card(
                             .object_fit(ObjectFit::Cover),
                     )
                 })
-                .child(
-                    div()
-                        .absolute()
-                        .bottom_0()
-                        .left_0()
-                        .right_0()
-                        .h(px(72.))
-                        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.55)),
-                )
-                .when(show_overlay, |el| {
-                    el.child(render_poster_overlay(&id, busy, excluded, selected, cx))
+                .when(hovered, |el| {
+                    el.child(render_play_veil(&id, busy || excluded, cx))
                 }),
-        )
-        .child(
-            v_flex()
-                .gap_0p5()
-                .child(
-                    div()
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(theme.foreground)
-                        .child(game.name.clone()),
-                )
-                .child(
-                    h_flex()
-                        .gap_1()
-                        .items_center()
-                        .child(
-                            div()
-                                .px_1p5()
-                                .py_0p5()
-                                .rounded(theme.radius)
-                                .bg(theme.primary.opacity(0.16))
-                                .text_xs()
-                                .text_color(theme.primary)
-                                .child(status),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(badge),
-                        ),
-                ),
         )
 }
 
 fn render_monogram_tile(
     monogram: &Monogram,
     badge: &'static str,
-    accent: gpui::Hsla,
+    muted: gpui::Hsla,
     fg: gpui::Hsla,
 ) -> impl IntoElement {
     v_flex()
@@ -366,12 +326,11 @@ fn render_monogram_tile(
         .justify_center()
         .gap_2()
         .p_3()
-        .bg(accent.opacity(0.18))
         .child(
             div()
                 .text_3xl()
                 .font_bold()
-                .text_color(accent)
+                .text_color(muted)
                 .child(monogram.initials.clone()),
         )
         .child(
@@ -387,125 +346,52 @@ fn render_monogram_tile(
                 .py_0p5()
                 .rounded(px(4.))
                 .text_xs()
-                .text_color(fg.opacity(0.8))
+                .text_color(muted)
                 .child(badge),
         )
 }
 
-fn render_poster_overlay(
-    id: &str,
-    busy: bool,
-    excluded: bool,
-    selected: bool,
-    cx: &mut Context<LibraryApp>,
-) -> impl IntoElement {
-    let theme = cx.theme().clone();
+fn render_play_veil(id: &str, disabled: bool, cx: &mut Context<LibraryApp>) -> impl IntoElement {
     let id = id.to_string();
     v_flex()
-        .id(SharedString::from(format!("poster-overlay-{id}")))
+        .id(SharedString::from(format!("poster-veil-{id}")))
         .absolute()
         .inset_0()
-        .p_2()
-        .gap_1()
-        .justify_end()
-        .bg(gpui::hsla(
-            0.0,
-            0.0,
-            0.0,
-            if selected { 0.42 } else { 0.28 },
-        ))
+        .items_center()
+        .justify_center()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.46))
         .occlude()
         .child(
-            h_flex()
-                .gap_1()
-                .flex_wrap()
-                .child(
-                    Button::new(SharedString::from(format!("poster-compact-{id}")))
-                        .primary()
-                        .xsmall()
-                        .icon(Icon::empty().path("icons/file-archive.svg"))
-                        .label("Compress")
-                        .disabled(busy || excluded)
-                        .on_click({
-                            let id = id.clone();
-                            cx.listener(move |this, _, window, cx| {
-                                if !this.selected_ids.contains(&id) {
-                                    this.select_game(id.clone(), cx);
-                                }
-                                this.open_compact_level_dialog(window, cx);
-                            })
-                        }),
-                )
-                .child(
-                    Button::new(SharedString::from(format!("poster-undo-{id}")))
-                        .outline()
-                        .xsmall()
-                        .icon(Icon::empty().path("icons/undo-2.svg"))
-                        .label("Restore")
-                        .disabled(busy || excluded)
-                        .on_click({
-                            let id = id.clone();
-                            cx.listener(move |this, _, window, cx| {
-                                if !this.selected_ids.contains(&id) {
-                                    this.select_game(id.clone(), cx);
-                                }
-                                this.start_compact(CompactOp::Uncompress, window, cx);
-                            })
-                        }),
-                ),
+            Button::new(SharedString::from(format!("poster-launch-{id}")))
+                .primary()
+                .small()
+                .icon(Icon::empty().path("icons/play.svg"))
+                .label("Play")
+                .disabled(disabled)
+                .on_click({
+                    let id = id.clone();
+                    cx.listener(move |this, _, window, cx| {
+                        this.select_game(id.clone(), cx);
+                        this.launch_selected(window, cx);
+                    })
+                }),
         )
-        .child(
-            h_flex()
-                .gap_1()
-                .flex_wrap()
-                .child(
-                    Button::new(SharedString::from(format!("poster-folder-{id}")))
-                        .outline()
-                        .xsmall()
-                        .icon(IconName::FolderOpen)
-                        .label("Folder")
-                        .on_click({
-                            let id = id.clone();
-                            cx.listener(move |this, _, _, cx| {
-                                this.open_install_folder(&id, cx);
-                            })
-                        }),
-                )
-                .child(
-                    Button::new(SharedString::from(format!("poster-launch-{id}")))
-                        .outline()
-                        .xsmall()
-                        .icon(Icon::empty().path("icons/play.svg"))
-                        .label("Play")
-                        .disabled(busy)
-                        .on_click({
-                            let id = id.clone();
-                            cx.listener(move |this, _, window, cx| {
-                                this.select_game(id.clone(), cx);
-                                this.launch_selected(window, cx);
-                            })
-                        }),
-                )
-                .child(
-                    Button::new(SharedString::from(format!("poster-estimate-{id}")))
-                        .ghost()
-                        .xsmall()
-                        .icon(IconName::Search)
-                        .label("Check")
-                        .disabled(busy || excluded)
-                        .on_click({
-                            let id = id.clone();
-                            cx.listener(move |this, _, window, cx| {
-                                this.select_game(id.clone(), cx);
-                                this.estimate_selected(window, cx);
-                            })
-                        }),
-                ),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child("Ctrl+click to add"),
-        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{poster_size, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM};
+    use crate::settings::UiDensity;
+
+    #[test]
+    fn posters_are_portrait_2_by_3_in_spec() {
+        for density in [UiDensity::Comfortable, UiDensity::Compact] {
+            let (w, h) = poster_size(density);
+            assert!((180.0..=220.0).contains(&w), "width {w}");
+            assert!((w * 3.0 - h * 2.0).abs() < 0.01, "2:3 {w}x{h}");
+        }
+        assert!((8.0..=12.0).contains(&POSTER_RADIUS));
+        assert!((6.0..=10.0).contains(&POSTER_GAP));
+        assert!((UNSELECTED_DIM - 0.6).abs() < 0.001);
+    }
 }

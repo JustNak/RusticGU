@@ -525,6 +525,7 @@ mod tests {
             steam_app_id: app_id,
             steam_library_path: None,
             steam_install_dir_name: None,
+            cover_url: None,
         }
     }
 

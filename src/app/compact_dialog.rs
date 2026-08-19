@@ -1,8 +1,10 @@
 //! Low / Medium / High compact dialog. No Switch — library Switch panics here.
+//!
+//! One ~480px dialog. Radio-cards show Low / Medium / High only — no XPRESS/LZX.
 
 use gpui::{
-    div, px, AppContext, Context, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window,
+    div, prelude::FluentBuilder, px, AppContext, Context, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -35,7 +37,7 @@ impl Render for CompactLevelPicker {
         v_flex()
             .id("compact-level-picker")
             .gap_3()
-            .w(px(620.))
+            .w_full()
             .child(
                 div()
                     .text_sm()
@@ -43,54 +45,73 @@ impl Render for CompactLevelPicker {
                     .child(self.heading.clone()),
             )
             .child(
-                h_flex()
-                    .gap_3()
+                v_flex()
+                    .gap_2()
                     .w_full()
                     .children(CompactLevel::ALL.into_iter().map(|level| {
                         let on = selected == level;
-                        v_flex()
+                        h_flex()
                             .id(SharedString::from(format!(
                                 "compact-level-{}",
                                 level.label()
                             )))
-                            .flex_1()
-                            .min_h(px(132.))
-                            .p_3()
-                            .gap_2()
-                            .rounded(theme.radius_lg)
+                            .w_full()
+                            .items_center()
+                            .justify_between()
+                            .px_3()
+                            .py_3()
+                            .gap_3()
+                            .rounded(px(10.))
                             .border_1()
                             .border_color(if on {
-                                theme.list_active_border
+                                theme.primary
                             } else {
-                                theme.border.opacity(0.55)
+                                theme.border.opacity(0.5)
                             })
                             .bg(if on {
-                                theme.list_active
+                                theme.secondary.opacity(0.55)
                             } else {
-                                theme.secondary.opacity(0.35)
+                                theme.secondary.opacity(0.28)
                             })
-                            .hover(|s| s.bg(theme.secondary.opacity(0.55)))
+                            .hover(|s| s.bg(theme.secondary.opacity(0.5)))
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.level = level;
                                 cx.notify();
                             }))
                             .child(
-                                Icon::empty()
-                                    .path(level.icon_path())
-                                    .with_size(px(22.))
-                                    .text_color(if on {
-                                        theme.primary
-                                    } else {
-                                        theme.muted_foreground
+                                h_flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        Icon::empty()
+                                            .path(level.icon_path())
+                                            .with_size(px(18.))
+                                            .text_color(if on {
+                                                theme.foreground
+                                            } else {
+                                                theme.muted_foreground
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_semibold()
+                                            .text_color(theme.foreground)
+                                            .child(level.label()),
+                                    )
+                                    .when(level.recommended(), |el| {
+                                        el.child(
+                                            div()
+                                                .px_1p5()
+                                                .py_0p5()
+                                                .rounded(px(4.))
+                                                .bg(theme.muted.opacity(0.7))
+                                                .text_xs()
+                                                .text_color(theme.muted_foreground)
+                                                .child("Recommended"),
+                                        )
                                     }),
-                            )
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_bold()
-                                    .text_color(if on { theme.primary } else { theme.foreground })
-                                    .child(level.label()),
                             )
                             .child(
                                 div()
@@ -101,21 +122,33 @@ impl Render for CompactLevelPicker {
                     })),
             )
             .child(
-                h_flex().w_full().justify_end().child(
-                    Button::new("compact-level-confirm")
-                        .primary()
-                        .label("Confirm")
-                        .on_click({
-                            let app = self.app.clone();
-                            let level = self.level;
-                            move |_, window, cx| {
-                                app.update(cx, |app, cx| {
-                                    app.apply_compact_level(level, window, cx);
-                                });
+                h_flex()
+                    .w_full()
+                    .justify_end()
+                    .gap_2()
+                    .child(
+                        Button::new("compact-level-confirm")
+                            .primary()
+                            .label("Compress")
+                            .on_click({
+                                let app = self.app.clone();
+                                let level = self.level;
+                                move |_, window, cx| {
+                                    app.update(cx, |app, cx| {
+                                        app.apply_compact_level(level, window, cx);
+                                    });
+                                    window.close_dialog(cx);
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("compact-level-cancel")
+                            .outline()
+                            .label("Cancel")
+                            .on_click(|_, window, cx| {
                                 window.close_dialog(cx);
-                            }
-                        }),
-                ),
+                            }),
+                    ),
             )
     }
 }
@@ -148,7 +181,8 @@ impl LibraryApp {
                 .title("Compress")
                 .overlay_closable(true)
                 .keyboard(true)
-                .w(px(660.))
+                .on_cancel(|_, _, _| true)
+                .w(px(480.))
                 .border_color(theme.border.opacity(0.32))
                 .child(picker.clone())
         });

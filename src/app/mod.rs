@@ -309,7 +309,13 @@ impl LibraryApp {
             let _ = this.update(cx, |app, cx| {
                 app.library_scanning = false;
                 match result {
-                    Ok(games) => {
+                    Ok(mut games) => {
+                        crate::covers::attach_itch_cover_urls(
+                            &mut games,
+                            crate::library::extra_store_roots(false)
+                                .itch_config
+                                .as_deref(),
+                        );
                         app.games = games;
                         app.library_error = None;
                         app.prune_selection();

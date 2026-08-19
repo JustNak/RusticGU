@@ -80,6 +80,7 @@ mod tests {
             steam_app_id: Some(1),
             steam_library_path: None,
             steam_install_dir_name: None,
+            cover_url: None,
         }
     }
 

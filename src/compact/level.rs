@@ -41,6 +41,10 @@ impl CompactLevel {
         }
     }
 
+    pub fn recommended(self) -> bool {
+        matches!(self, Self::Medium)
+    }
+
     pub fn icon_path(self) -> &'static str {
         match self {
             Self::Low => "icons/arrow-down.svg",
@@ -114,6 +118,13 @@ mod tests {
         assert_eq!(CompactLevel::Low.tradeoff().split('.').count(), 3);
         assert!(CompactLevel::ALL.iter().all(|l| l.tradeoff().len() < 40));
         assert_eq!(CompactLevel::default(), CompactLevel::Medium);
+        assert!(CompactLevel::Medium.recommended());
+        assert!(!CompactLevel::High.recommended());
+        for level in CompactLevel::ALL {
+            let blob = format!("{} {}", level.label(), level.tradeoff()).to_ascii_uppercase();
+            assert!(!blob.contains("XPRESS"), "{blob}");
+            assert!(!blob.contains("LZX"), "{blob}");
+        }
         // Live Settings still coerce LZX; this dialog must not use that path.
         assert_eq!(
             CompactLevel::High.algorithm().for_live_library(),

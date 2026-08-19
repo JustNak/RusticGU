@@ -5,7 +5,10 @@ use std::sync::Arc;
 use gpui::{Context, RenderImage};
 
 use super::LibraryApp;
-use crate::covers::{fetch_steam_cover_to_cache, render_image_from_path, resolve_local_cover_file};
+use crate::covers::{
+    extra_cover_cache_path, fetch_steam_cover_to_cache, fetch_url_cover_to_cache,
+    render_image_from_path, resolve_local_cover_file,
+};
 use crate::library::{steam_path, LibraryTitle};
 
 impl LibraryApp {
@@ -33,15 +36,14 @@ impl LibraryApp {
                 .games
                 .iter()
                 .find(|game| {
-                    game.steam_app_id().is_some()
-                        && !self.covers.contains_key(&game.id)
+                    !self.covers.contains_key(&game.id)
                         && !self.cover_inflight.contains(&game.id)
+                        && (game.steam_app_id().is_some() || game.cover_url.is_some())
                 })
                 .cloned();
             let Some(game) = next else {
                 break;
             };
-            // Local steam library cache may have appeared after scan.
             if let Some(path) =
                 resolve_local_cover_file(&self.paths.root, &game, steam_root.as_deref())
             {
@@ -51,11 +53,20 @@ impl LibraryApp {
                 }
             }
             self.cover_inflight.insert(game.id.clone());
-            self.spawn_steam_cover_fetch(game, cx);
+            if game.steam_app_id().is_some() {
+                self.spawn_steam_cover_fetch(game, steam_root.clone(), cx);
+            } else {
+                self.spawn_url_cover_fetch(game, cx);
+            }
         }
     }
 
-    fn spawn_steam_cover_fetch(&mut self, game: LibraryTitle, cx: &mut Context<Self>) {
+    fn spawn_steam_cover_fetch(
+        &mut self,
+        game: LibraryTitle,
+        steam_root: Option<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(app_id) = game.steam_app_id() else {
             self.cover_inflight.remove(&game.id);
             return;
@@ -64,11 +75,37 @@ impl LibraryApp {
         let id = game.id.clone();
         let (tx, rx) = async_channel::bounded::<Option<Arc<RenderImage>>>(1);
         std::thread::spawn(move || {
-            let image = fetch_steam_cover_to_cache(&root, app_id)
+            let image = fetch_steam_cover_to_cache(&root, steam_root.as_deref(), app_id)
                 .ok()
                 .and_then(|path| render_image_from_path(&path));
             let _ = tx.send_blocking(image);
         });
+        self.await_cover(id, rx, cx);
+    }
+
+    fn spawn_url_cover_fetch(&mut self, game: LibraryTitle, cx: &mut Context<Self>) {
+        let Some(url) = game.cover_url.clone() else {
+            self.cover_inflight.remove(&game.id);
+            return;
+        };
+        let dest = extra_cover_cache_path(&self.paths.root, &game.id);
+        let id = game.id.clone();
+        let (tx, rx) = async_channel::bounded::<Option<Arc<RenderImage>>>(1);
+        std::thread::spawn(move || {
+            let image = fetch_url_cover_to_cache(&dest, &url, true)
+                .ok()
+                .and_then(|path| render_image_from_path(&path));
+            let _ = tx.send_blocking(image);
+        });
+        self.await_cover(id, rx, cx);
+    }
+
+    fn await_cover(
+        &mut self,
+        id: String,
+        rx: async_channel::Receiver<Option<Arc<RenderImage>>>,
+        cx: &mut Context<Self>,
+    ) {
         cx.spawn(async move |this, cx| {
             if let Ok(image) = rx.recv().await {
                 let _ = this.update(cx, |app, cx| {
