@@ -4,6 +4,7 @@
 
 mod command;
 mod engine;
+mod level;
 mod skip;
 
 #[allow(unused_imports)]
@@ -16,6 +17,7 @@ pub use command::{
     invocation_has_force_flag, invocation_recurses_install_root, is_lznt1_command,
     is_wof_exe_command, CompactInvocation,
 };
+#[allow(unused_imports)]
 pub use engine::{
     apply_compact, apply_compact_allowing_lzx, apply_incremental, estimate_compact,
     estimate_compact_with, preflight, CompactEstimate, CompactProgress, CompactRefuse,
@@ -24,6 +26,7 @@ pub use engine::{
 pub use engine::{
     is_windows_apps_path, os_supports_wof, running_exe_in_tree, volume_filesystem, CompactResult,
 };
+pub use level::{decide_compact_apply, CompactApplyDecision, CompactLevel};
 #[allow(unused_imports)]
 pub use skip::{
     collect_included_files, path_is_auto_excluded, should_skip, skip_reason,

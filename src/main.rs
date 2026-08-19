@@ -6,6 +6,7 @@ mod appearance;
 mod assets;
 mod branding;
 mod compact;
+mod covers;
 mod format;
 mod library;
 mod live;
