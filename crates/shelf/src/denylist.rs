@@ -74,10 +74,11 @@ fn folder_match(install: Option<&Path>, markers: &[String]) -> bool {
     let Some(path) = install else {
         return false;
     };
-    path.components().any(|c| {
-        let name = c.as_os_str().to_string_lossy();
-        markers.iter().any(|m| name.eq_ignore_ascii_case(m))
-    })
+    // Split on both separators so `D:\Games\Guild Wars 2` matches on Linux tests.
+    path.to_string_lossy()
+        .split(['/', '\\'])
+        .filter(|s| !s.is_empty())
+        .any(|name| markers.iter().any(|m| name.eq_ignore_ascii_case(m)))
 }
 
 /// Default denylist for games that rewrite their own files.
