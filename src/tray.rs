@@ -781,8 +781,6 @@ mod windows_impl {
     }
 
     pub(super) fn icon_anchor(hwnd_raw: isize) -> Option<super::TrayIconAnchor> {
-        use windows::Win32::Foundation::RECT;
-
         if hwnd_raw != 0 {
             let ident = NOTIFYICONIDENTIFIER {
                 cbSize: std::mem::size_of::<NOTIFYICONIDENTIFIER>() as u32,
@@ -790,8 +788,7 @@ mod windows_impl {
                 uID: TRAY_UID,
                 guidItem: Default::default(),
             };
-            let mut rect = RECT::default();
-            if unsafe { Shell_NotifyIconGetRect(&ident, &mut rect) }.is_ok() {
+            if let Ok(rect) = unsafe { Shell_NotifyIconGetRect(&ident) } {
                 if let Some(anchor) =
                     super::anchor_from_notify_rect(rect.left, rect.top, rect.right, rect.bottom)
                 {

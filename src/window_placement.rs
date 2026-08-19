@@ -401,10 +401,10 @@ fn place_flyout_hwnd(
         GetMonitorInfoW, MonitorFromPoint, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, GetWindowLongW, GetWindowRect, SetForegroundWindow, SetWindowLongW,
-        SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
-        SWP_SHOWWINDOW, SW_SHOWNA, WS_CAPTION, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW,
-        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+        GetCursorPos, GetWindowLongW, SetForegroundWindow, SetWindowLongW, SetWindowPos,
+        ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_SHOWWINDOW,
+        SW_SHOWNA, WS_CAPTION, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
     };
 
     unsafe {
@@ -517,7 +517,7 @@ fn flyout_physical_size(
 /// Dark, rounded popup chrome (Win11 DWM). No-op on older builds.
 #[cfg(windows)]
 fn apply_flyout_hwnd_chrome(hwnd: windows::Win32::Foundation::HWND) {
-    use windows::Win32::Foundation::BOOL;
+    use windows::core::BOOL;
     use windows::Win32::Graphics::Dwm::{
         DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
         DWMWCP_ROUND,

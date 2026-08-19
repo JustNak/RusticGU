@@ -78,6 +78,7 @@ pub(crate) fn render_vignette_overlay(edge_alpha: f32, is_dark: bool) -> impl In
 }
 
 /// Decorative icon badge for empty / search-empty states.
+#[allow(dead_code)]
 pub(crate) fn empty_state_badge(
     icon: IconName,
     icon_color: Hsla,
