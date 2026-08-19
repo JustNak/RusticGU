@@ -492,9 +492,13 @@ fn apply_wof(
     progress(CompactProgress {
         processed: 0,
         total: estimate.file_count.max(1),
-        message: match op {
-            CompactOp::Compress => "Starting WOF compact…".into(),
-            CompactOp::Uncompress => "Starting WOF uncompact…".into(),
+        message: if force {
+            "Changing compression…".into()
+        } else {
+            match op {
+                CompactOp::Compress => "Starting WOF compact…".into(),
+                CompactOp::Uncompress => "Starting WOF uncompact…".into(),
+            }
         },
     });
 

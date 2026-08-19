@@ -66,8 +66,8 @@ pub fn build_wof_files_command(
 
 /// WOF command using the algorithm as given, optionally `/F` to rewrite already-compressed files.
 ///
-/// `/F` is for an explicit Change-method apply only. Incremental live compact and first
-/// compress must keep `force == false`.
+/// `/F` is for Change-method apply only. Incremental live compact and first compress
+/// must keep `force == false` — already-compressed files are skipped by default.
 pub fn build_wof_files_command_with(
     op: CompactOp,
     files: &[PathBuf],
@@ -169,17 +169,22 @@ pub fn invocation_has_force_flag(inv: &CompactInvocation) -> bool {
     })
 }
 
-/// Undo may recurse the install root (`/U /EXE /S`). Compress must not.
+/// Undo may recurse the install root. Compress must not.
+///
+/// `compact /S` with no directory uses the process CWD. Bind the install root
+/// as `/S:<dir>` so Decompress cannot walk System32 / the app folder instead.
 pub fn build_uncompress_root_command(root: &Path) -> CompactInvocation {
+    let mut s_dir = OsString::from("/S:");
+    s_dir.push(root.as_os_str());
     CompactInvocation {
         program: OsString::from("compact.exe"),
         args: vec![
             OsString::from("/U"),
             OsString::from("/EXE"),
-            OsString::from("/S"),
+            s_dir,
+            OsString::from("/A"),
             OsString::from("/I"),
             OsString::from("/Q"),
-            root.as_os_str().to_os_string(),
         ],
     }
 }
@@ -219,23 +224,29 @@ fn batch_apply_files(
     out
 }
 
-/// True when this invocation would recursively WOF the install root (`/S` + root).
+/// True when this invocation recursively WOF-operates the install root (`/S:<root>`).
+///
+/// A bare `/S` is CWD recursion and does **not** count — that is the Decompress bug.
 pub fn invocation_recurses_install_root(inv: &CompactInvocation, root: &Path) -> bool {
-    let args: Vec<String> = inv
-        .args
-        .iter()
-        .map(|a| a.to_string_lossy().into_owned())
-        .collect();
-    let has_s = args.iter().any(|a| {
-        let u = a.to_ascii_uppercase();
-        u == "/S" || u.starts_with("/S:")
-    });
-    if !has_s {
-        return false;
-    }
     let root_key = normalize_path_key(root);
-    args.iter()
-        .any(|a| normalize_path_key(Path::new(a)) == root_key)
+    inv.args.iter().any(|a| {
+        let s = a.to_string_lossy();
+        s_flag_directory(&s).is_some_and(|dir| normalize_path_key(Path::new(dir)) == root_key)
+    })
+}
+
+/// Directory bound by `/S:dir`. `None` for a bare `/S` (CWD).
+fn s_flag_directory(arg: &str) -> Option<&str> {
+    let bytes = arg.as_bytes();
+    if bytes.len() > 3
+        && bytes[0] == b'/'
+        && (bytes[1] == b'S' || bytes[1] == b's')
+        && bytes[2] == b':'
+    {
+        Some(&arg[3..])
+    } else {
+        None
+    }
 }
 
 fn normalize_path_key(path: &Path) -> String {
@@ -564,6 +575,53 @@ mod tests {
         assert!(!joined.contains("slot.sav"), "{joined}");
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn uncompress_root_binds_s_to_install_dir() {
+        let root = PathBuf::from(r"D:\SteamLibrary\steamapps\common\Bar Game");
+        let inv = build_uncompress_root_command(&root);
+        let args: Vec<String> = inv
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            !args.iter().any(|a| a.eq_ignore_ascii_case("/S")),
+            "bare /S walks CWD: {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| s_flag_directory(a).is_some_and(|d| {
+                normalize_path_key(Path::new(d)) == normalize_path_key(&root)
+            })),
+            "expected /S:<install root>, got {args:?}"
+        );
+        assert!(args.iter().any(|a| a.eq_ignore_ascii_case("/U")));
+        assert!(args.iter().any(|a| a.eq_ignore_ascii_case("/EXE")));
+        assert!(args.iter().any(|a| a.eq_ignore_ascii_case("/A")));
+        assert!(is_wof_exe_command(&inv));
+        assert!(!is_lznt1_command(&inv));
+        assert!(invocation_recurses_install_root(&inv, &root));
+        assert!(!args
+            .iter()
+            .any(|a| normalize_path_key(Path::new(a)) == normalize_path_key(&root)));
+    }
+
+    #[test]
+    fn bare_s_plus_root_filename_does_not_count_as_bound() {
+        let root = PathBuf::from(r"C:\games\Foo");
+        let inv = CompactInvocation {
+            program: OsString::from("compact.exe"),
+            args: vec![
+                OsString::from("/U"),
+                OsString::from("/EXE"),
+                OsString::from("/S"),
+                OsString::from("/I"),
+                OsString::from("/Q"),
+                root.as_os_str().to_os_string(),
+            ],
+        };
+        assert!(!invocation_recurses_install_root(&inv, &root));
     }
 
     #[test]
