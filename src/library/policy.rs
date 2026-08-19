@@ -77,6 +77,7 @@ mod tests {
             last_played_unix,
             logical_bytes: None,
             on_disk_bytes: None,
+            compacted: false,
             steam_app_id: Some(1),
             steam_library_path: None,
             steam_install_dir_name: None,
