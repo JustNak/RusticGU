@@ -7,7 +7,7 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    v_flex, ActiveTheme, Disableable, Root, StyledExt, TitleBar,
+    v_flex, ActiveTheme, Disableable, Icon, IconName, Root, StyledExt, TitleBar,
 };
 
 use super::LibraryApp;
@@ -84,11 +84,20 @@ impl gpui::Render for TrayFlyout {
                         Button::new("flyout-pause-live")
                             .outline()
                             .w_full()
-                            .label("Pause/Resume Live Compact")
-                            .tooltip(if snapshot.live_paused {
-                                "Live Compact is paused. Click to resume."
+                            .icon(if snapshot.live_paused {
+                                Icon::empty().path("icons/play.svg")
                             } else {
-                                "Pause Live Compact after patches."
+                                Icon::new(IconName::Minus)
+                            })
+                            .label(if snapshot.live_paused {
+                                "Resume live"
+                            } else {
+                                "Pause live"
+                            })
+                            .tooltip(if snapshot.live_paused {
+                                "Live compact is paused. Click to resume."
+                            } else {
+                                "Pause live compact after patches."
                             })
                             .on_click({
                                 let app = app.clone();
@@ -103,9 +112,10 @@ impl gpui::Render for TrayFlyout {
                         Button::new("flyout-recompact")
                             .primary()
                             .w_full()
-                            .label("Recompact last patch")
+                            .icon(IconName::Redo2)
+                            .label("Retry last")
                             .disabled(!snapshot.has_last_plan || snapshot.compact_busy)
-                            .tooltip("Recompact files from the last Steam patch.")
+                            .tooltip("Retry compact on files from the last Steam patch.")
                             .on_click({
                                 let app = app.clone();
                                 move |_, _, cx| {
@@ -119,6 +129,7 @@ impl gpui::Render for TrayFlyout {
                         Button::new("flyout-open-main")
                             .outline()
                             .w_full()
+                            .icon(IconName::ExternalLink)
                             .label("Open RusticGU")
                             .on_click({
                                 let app = app.clone();

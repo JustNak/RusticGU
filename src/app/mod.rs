@@ -532,9 +532,9 @@ impl LibraryApp {
         let paused = self.live.toggle_paused();
         self.show_toast(
             if paused {
-                "Live Compact paused."
+                "Paused live."
             } else {
-                "Live Compact resumed."
+                "Resumed live."
             },
             cx,
         );
@@ -551,7 +551,7 @@ impl LibraryApp {
         self.compact_progress = Some(CompactProgress {
             processed: 0,
             total: 1,
-            message: "Recompacting last patch…".into(),
+            message: "Retrying last patch…".into(),
         });
         cx.notify();
         let live = self.live.clone();
@@ -762,18 +762,23 @@ impl Render for LibraryApp {
             .relative()
             .size_full()
             .bg(theme.background)
-            .child(v_flex().size_full().child(self.render_title_bar(cx)).child(
-                if self.filter == FilterKind::Settings {
+            .child(
+                v_flex().size_full().child(self.render_title_bar(cx)).child(
                     gpui_component::h_flex()
                         .flex_1()
                         .min_h_0()
-                        .child(self.render_settings_sidebar(cx).into_any_element())
-                        .child(self.render_settings(cx).into_any_element())
-                        .into_any_element()
-                } else {
-                    self.render_library(cx).into_any_element()
-                },
-            ))
+                        .child(if self.filter == FilterKind::Settings {
+                            self.render_settings_sidebar(cx).into_any_element()
+                        } else {
+                            self.render_sidebar(cx).into_any_element()
+                        })
+                        .child(if self.filter == FilterKind::Settings {
+                            self.render_settings(cx).into_any_element()
+                        } else {
+                            self.render_library(cx).into_any_element()
+                        }),
+                ),
+            )
             .when(vignette, |el| {
                 el.child(render_vignette_overlay(
                     vignette_edge_alpha(self.settings.vignette_intensity),

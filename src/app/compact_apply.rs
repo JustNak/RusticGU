@@ -167,8 +167,8 @@ impl LibraryApp {
                 }
             }
             let verb = match op {
-                CompactOp::Compress => "Compacted",
-                CompactOp::Uncompress => "Uncompacted",
+                CompactOp::Compress => "Compressed",
+                CompactOp::Uncompress => "Restored",
             };
             let _ = tx.send_blocking(Ok(CompactProgress {
                 processed: total,
@@ -188,8 +188,8 @@ impl LibraryApp {
                     Ok(progress) => {
                         let finished = progress.processed >= progress.total
                             && (progress.message.contains("WOF /EXE")
-                                || progress.message.starts_with("Compacted ")
-                                || progress.message.starts_with("Uncompacted "));
+                                || progress.message.starts_with("Compressed ")
+                                || progress.message.starts_with("Restored "));
                         app.compact_progress = Some(progress.clone());
                         if finished {
                             app.compact_busy = false;

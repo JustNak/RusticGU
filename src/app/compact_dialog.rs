@@ -6,7 +6,7 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, StyledExt, WindowExt,
+    h_flex, v_flex, ActiveTheme, Icon, Sizable, StyledExt, WindowExt,
 };
 
 use super::LibraryApp;
@@ -76,6 +76,16 @@ impl Render for CompactLevelPicker {
                                 cx.notify();
                             }))
                             .child(
+                                Icon::empty()
+                                    .path(level.icon_path())
+                                    .with_size(px(22.))
+                                    .text_color(if on {
+                                        theme.primary
+                                    } else {
+                                        theme.muted_foreground
+                                    }),
+                            )
+                            .child(
                                 div()
                                     .text_lg()
                                     .font_bold()
@@ -87,12 +97,6 @@ impl Render for CompactLevelPicker {
                                     .text_xs()
                                     .text_color(theme.muted_foreground)
                                     .child(level.tradeoff()),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(theme.muted_foreground.opacity(0.8))
-                                    .child(level.algorithm().label()),
                             )
                     })),
             )
@@ -132,16 +136,16 @@ impl LibraryApp {
             return;
         }
         let heading = if titles.len() == 1 {
-            format!("Compact {}.", titles[0].name)
+            format!("Compress {}.", titles[0].name)
         } else {
-            format!("Compact {} selected titles.", titles.len())
+            format!("Compress {} selected titles.", titles.len())
         };
         let app = cx.entity();
         let picker = cx.new(|_cx| CompactLevelPicker::new(app, heading));
         window.open_dialog(cx, move |dialog, _window, cx| {
             let theme = cx.theme().clone();
             dialog
-                .title("Compact level")
+                .title("Compress")
                 .overlay_closable(true)
                 .keyboard(true)
                 .w(px(660.))

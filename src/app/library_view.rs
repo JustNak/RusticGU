@@ -11,7 +11,7 @@ use gpui_component::{
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable, StyledExt,
 };
 
-use super::widgets::{empty_state_badge, format_nav_count, styled_progress};
+use super::widgets::{empty_state_badge, styled_progress};
 use super::FilterKind;
 use super::LibraryApp;
 use crate::compact::CompactOp;
@@ -31,7 +31,6 @@ impl LibraryApp {
         let busy = self.compact_busy;
         let hovered = self.hovered_id.clone();
         let filter = self.filter;
-        let (all, compacted, uncompacted) = self.library_counts();
         let selected_n = self.selected_titles().len();
 
         v_flex()
@@ -47,30 +46,15 @@ impl LibraryApp {
                     .justify_between()
                     .gap_3()
                     .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(wall_filter_chip(
-                                "All",
-                                FilterKind::Library,
-                                all,
-                                filter == FilterKind::Library,
-                                cx,
-                            ))
-                            .child(wall_filter_chip(
-                                "Compacted",
-                                FilterKind::Compacted,
-                                compacted,
-                                filter == FilterKind::Compacted,
-                                cx,
-                            ))
-                            .child(wall_filter_chip(
-                                "Uncompacted",
-                                FilterKind::Uncompacted,
-                                uncompacted,
-                                filter == FilterKind::Uncompacted,
-                                cx,
-                            )),
+                        div()
+                            .text_lg()
+                            .font_bold()
+                            .text_color(theme.foreground)
+                            .child(match filter {
+                                FilterKind::Compacted => "Compacted",
+                                FilterKind::Uncompacted => "Uncompacted",
+                                _ => "Library",
+                            }),
                     )
                     .child(
                         h_flex()
@@ -90,10 +74,11 @@ impl LibraryApp {
                                     Button::new("library-compact-selected")
                                         .primary()
                                         .small()
+                                        .icon(Icon::empty().path("icons/file-archive.svg"))
                                         .label(if selected_n == 1 {
-                                            "Compact".into()
+                                            "Compress".into()
                                         } else {
-                                            format!("Compact {selected_n}")
+                                            format!("Compress {selected_n}")
                                         })
                                         .disabled(busy)
                                         .on_click(cx.listener(|this, _, window, cx| {
@@ -102,9 +87,9 @@ impl LibraryApp {
                                 )
                             })
                             .child(
-                                Button::new("library-rescan")
+                                Button::new("library-refresh")
                                     .outline()
-                                    .label("Rescan")
+                                    .label("Refresh")
                                     .icon(Icon::empty().path("icons/rotate-cw.svg"))
                                     .on_click(
                                         cx.listener(|this, _, _, cx| this.refresh_library(cx)),
@@ -207,60 +192,10 @@ impl LibraryApp {
                     .child(if filtered {
                         "No titles match this filter."
                     } else {
-                        "No games found. Install a launcher or rescan."
+                        "No games found. Install a launcher or refresh."
                     }),
             )
     }
-}
-
-fn wall_filter_chip(
-    label: &'static str,
-    filter: FilterKind,
-    count: i32,
-    active: bool,
-    cx: &mut Context<LibraryApp>,
-) -> impl IntoElement {
-    let theme = cx.theme().clone();
-    h_flex()
-        .id(SharedString::from(format!("wall-filter-{label}")))
-        .h(px(30.))
-        .px_3()
-        .gap_2()
-        .items_center()
-        .rounded_full()
-        .border_1()
-        .border_color(if active {
-            theme.list_active_border
-        } else {
-            theme.border.opacity(0.45)
-        })
-        .bg(if active {
-            theme.list_active
-        } else {
-            theme.transparent
-        })
-        .hover(|s| s.bg(theme.secondary.opacity(0.45)))
-        .cursor_pointer()
-        .on_click(cx.listener(move |this, _, window, cx| {
-            this.select_filter(filter, window, cx);
-        }))
-        .child(
-            div()
-                .text_xs()
-                .font_semibold()
-                .text_color(if active {
-                    theme.primary
-                } else {
-                    theme.foreground
-                })
-                .child(label),
-        )
-        .child(
-            div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(format_nav_count(count)),
-        )
 }
 
 fn poster_size(density: UiDensity) -> (f32, f32) {
@@ -488,7 +423,8 @@ fn render_poster_overlay(
                     Button::new(SharedString::from(format!("poster-compact-{id}")))
                         .primary()
                         .xsmall()
-                        .label("Compact")
+                        .icon(Icon::empty().path("icons/file-archive.svg"))
+                        .label("Compress")
                         .disabled(busy || excluded)
                         .on_click({
                             let id = id.clone();
@@ -504,7 +440,8 @@ fn render_poster_overlay(
                     Button::new(SharedString::from(format!("poster-undo-{id}")))
                         .outline()
                         .xsmall()
-                        .label("Uncompact")
+                        .icon(Icon::empty().path("icons/undo-2.svg"))
+                        .label("Restore")
                         .disabled(busy || excluded)
                         .on_click({
                             let id = id.clone();
@@ -525,6 +462,7 @@ fn render_poster_overlay(
                     Button::new(SharedString::from(format!("poster-folder-{id}")))
                         .outline()
                         .xsmall()
+                        .icon(IconName::FolderOpen)
                         .label("Folder")
                         .on_click({
                             let id = id.clone();
@@ -537,7 +475,8 @@ fn render_poster_overlay(
                     Button::new(SharedString::from(format!("poster-launch-{id}")))
                         .outline()
                         .xsmall()
-                        .label("Launch")
+                        .icon(Icon::empty().path("icons/play.svg"))
+                        .label("Play")
                         .disabled(busy)
                         .on_click({
                             let id = id.clone();
@@ -551,7 +490,8 @@ fn render_poster_overlay(
                     Button::new(SharedString::from(format!("poster-estimate-{id}")))
                         .ghost()
                         .xsmall()
-                        .label("Estimate")
+                        .icon(IconName::Search)
+                        .label("Check")
                         .disabled(busy || excluded)
                         .on_click({
                             let id = id.clone();

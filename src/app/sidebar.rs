@@ -13,7 +13,6 @@ use super::widgets::{nav_item, settings_nav_item};
 use super::LibraryApp;
 
 impl LibraryApp {
-    #[allow(dead_code)]
     pub(crate) fn render_sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let filter = self.filter;

@@ -38,11 +38,7 @@ impl LibraryApp {
         const TITLE_BAR_LEFT_PAD: f32 = 80.0;
         #[cfg(not(target_os = "macos"))]
         const TITLE_BAR_LEFT_PAD: f32 = 12.0;
-        let brand_col_w = if self.filter == FilterKind::Settings {
-            (self.settings.ui_density.sidebar_w() - TITLE_BAR_LEFT_PAD).max(80.0)
-        } else {
-            148.0
-        };
+        let brand_col_w = (self.settings.ui_density.sidebar_w() - TITLE_BAR_LEFT_PAD).max(80.0);
         let brand_menu = {
             let view = view.clone();
             move |menu: gpui_component::menu::PopupMenu,
@@ -166,18 +162,9 @@ impl LibraryApp {
                                 Button::new("title-refresh-library")
                                     .ghost()
                                     .icon(Icon::empty().path("icons/rotate-cw.svg"))
-                                    .tooltip("Rescan library")
+                                    .tooltip("Refresh")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.refresh_library(cx);
-                                    })),
-                            )
-                            .child(
-                                Button::new("title-open-settings")
-                                    .ghost()
-                                    .icon(IconName::Settings)
-                                    .tooltip("Settings")
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.select_filter(FilterKind::Settings, window, cx);
                                     })),
                             ),
                     )

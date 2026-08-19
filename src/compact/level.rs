@@ -35,9 +35,17 @@ impl CompactLevel {
 
     pub fn tradeoff(self) -> &'static str {
         match self {
-            Self::Low => "Fastest compact. Keeps more disk in use.",
-            Self::Medium => "Balanced speed and space. Recommended.",
-            Self::High => "Smallest on disk. Slowest. Uses LZX for this action only.",
+            Self::Low => "Faster. Uses more space.",
+            Self::Medium => "Balanced. Recommended.",
+            Self::High => "Smallest. Slowest.",
+        }
+    }
+
+    pub fn icon_path(self) -> &'static str {
+        match self {
+            Self::Low => "icons/arrow-down.svg",
+            Self::Medium => "icons/minus.svg",
+            Self::High => "icons/arrow-up.svg",
         }
     }
 
@@ -103,6 +111,8 @@ mod tests {
         assert!(!CompactLevel::Low.allows_lzx());
         assert!(!CompactLevel::Medium.allows_lzx());
         assert!(CompactLevel::High.allows_lzx());
+        assert_eq!(CompactLevel::Low.tradeoff().split('.').count(), 3);
+        assert!(CompactLevel::ALL.iter().all(|l| l.tradeoff().len() < 40));
         assert_eq!(CompactLevel::default(), CompactLevel::Medium);
         // Live Settings still coerce LZX; this dialog must not use that path.
         assert_eq!(
