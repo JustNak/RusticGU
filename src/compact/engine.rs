@@ -6,9 +6,7 @@ use crate::settings::CompactAlgorithm;
 
 use crate::library::steam_updating_app_id;
 
-use super::command::{
-    build_apply_invocations_with, build_incremental_invocations, CompactOp,
-};
+use super::command::{build_apply_invocations_with, build_incremental_invocations, CompactOp};
 use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
