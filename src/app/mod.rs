@@ -24,8 +24,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    canvas, div, prelude::FluentBuilder, App, AppContext, Context, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
+    canvas, div, prelude::FluentBuilder, AnyWindowHandle, App, AppContext, Context, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
 };
 use gpui_component::{
     input::InputState,
@@ -98,7 +98,9 @@ pub struct LibraryApp {
     pub(crate) main_hwnd: isize,
     pub(crate) pending_tray_show: bool,
     pub(crate) pending_toggle_flyout: bool,
+    pub(crate) pending_open_compact: bool,
     pub(crate) flyout_open: bool,
+    pub(crate) flyout_window: Option<AnyWindowHandle>,
     pub(crate) activate: ActivateBridge,
     pub(crate) live: LiveHandle,
 }
@@ -208,7 +210,9 @@ impl LibraryApp {
             main_hwnd: 0,
             pending_tray_show: false,
             pending_toggle_flyout: false,
+            pending_open_compact: false,
             flyout_open: false,
+            flyout_window: None,
             activate,
             live: LiveHandle::start(),
         };

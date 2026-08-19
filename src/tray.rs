@@ -59,6 +59,27 @@ pub fn truncate_utf16_units(s: &str, max_units: usize) -> &str {
     &s[..end]
 }
 
+/// Screen-pixel rectangle of the tray icon (or the cursor as a fallback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrayIconAnchor {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Cursor position as a 16×16 anchor when the icon rect is unavailable.
+pub fn cursor_anchor() -> Option<TrayIconAnchor> {
+    #[cfg(windows)]
+    {
+        windows_impl::cursor_anchor()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// RAII handle for the background tray icon. Dropping it removes the icon.
 pub struct SystemTray {
     #[cfg(windows)]
@@ -82,6 +103,18 @@ impl SystemTray {
         #[cfg(not(windows))]
         {
             let _ = event_tx;
+            None
+        }
+    }
+
+    /// Tray-icon rectangle in screen pixels, or the cursor if the icon is hidden.
+    pub fn icon_anchor(&self) -> Option<TrayIconAnchor> {
+        #[cfg(windows)]
+        {
+            windows_impl::icon_anchor(self.hwnd.load(std::sync::atomic::Ordering::SeqCst))
+        }
+        #[cfg(not(windows))]
+        {
             None
         }
     }
@@ -254,10 +287,10 @@ mod windows_impl {
     use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIIF_INFO,
-        NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONTIMEOUT,
-        NIN_BALLOONUSERCLICK, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION,
-        NOTIFY_ICON_INFOTIP_FLAGS,
+        Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP,
+        NIIF_ERROR, NIIF_INFO, NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+        NIN_BALLOONTIMEOUT, NIN_BALLOONUSERCLICK, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
+        NOTIFYICONIDENTIFIER, NOTIFYICON_VERSION, NOTIFY_ICON_INFOTIP_FLAGS,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
@@ -722,6 +755,44 @@ mod windows_impl {
 
     fn wide_null(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    pub(super) fn icon_anchor(hwnd_raw: isize) -> Option<super::TrayIconAnchor> {
+        use windows::Win32::Foundation::RECT;
+
+        if hwnd_raw != 0 {
+            let ident = NOTIFYICONIDENTIFIER {
+                cbSize: std::mem::size_of::<NOTIFYICONIDENTIFIER>() as u32,
+                hWnd: HWND(hwnd_raw as *mut core::ffi::c_void),
+                uID: TRAY_UID,
+                guidItem: Default::default(),
+            };
+            let mut rect = RECT::default();
+            if unsafe { Shell_NotifyIconGetRect(&ident, &mut rect) }.is_ok() {
+                let width = rect.right - rect.left;
+                let height = rect.bottom - rect.top;
+                if width > 0 && height > 0 {
+                    return Some(super::TrayIconAnchor {
+                        x: rect.left,
+                        y: rect.top,
+                        width,
+                        height,
+                    });
+                }
+            }
+        }
+        cursor_anchor()
+    }
+
+    pub(super) fn cursor_anchor() -> Option<super::TrayIconAnchor> {
+        let mut pt = windows::Win32::Foundation::POINT::default();
+        unsafe { GetCursorPos(&mut pt) }.ok()?;
+        Some(super::TrayIconAnchor {
+            x: pt.x,
+            y: pt.y,
+            width: 16,
+            height: 16,
+        })
     }
 }
 
