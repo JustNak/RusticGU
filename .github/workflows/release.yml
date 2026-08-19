@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "!v*-nightly.*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-windows:
+    name: Build & publish (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Rust release binaries
+        run: |
+          cargo build --release -p rusticgu
+          cargo build --release -p rusticgu-updater
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version 0.11.8
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          powershell -ExecutionPolicy Bypass -File scripts/package-release-assets.ps1
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          make_latest: true
+          prerelease: false
+          files: |
+            dist-release/RusticGU-windows-x64-setup.exe
+            dist-release/RusticGU-windows-x64.zip
+          body: |
+            ## RusticGU ${{ github.ref_name }}
+
+            Game library compact launcher for Windows.
+
+            ### Downloads
+            | Asset | Contents |
+            | --- | --- |
+            | **RusticGU-windows-x64-setup.exe** | **Recommended** — NSIS installer |
+            | **RusticGU-windows-x64.zip** | Portable desktop app |
+
+            ### Quick start
+            1. Download **RusticGU-windows-x64-setup.exe**
+            2. Run the installer (per-user, no admin required)
+            3. Launch RusticGU from the Start Menu
+
+            See the [README](https://github.com/JustNak/RusticGU#readme) for portable ZIP and build-from-source docs.
+
+            **License:** MIT — commercial use allowed; keep attribution (copyright notice).

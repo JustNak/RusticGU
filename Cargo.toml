@@ -1,0 +1,98 @@
+[workspace]
+members = [".", "apps/updater"]
+resolver = "2"
+
+[package]
+name = "rusticgu"
+version = "0.1.0"
+edition = "2021"
+description = "RusticGU — a game library compact launcher"
+license = "MIT"
+repository = "https://github.com/JustNak/RusticGU"
+homepage = "https://github.com/JustNak/RusticGU"
+readme = "README.md"
+authors = ["JustNak"]
+keywords = ["steam", "compact", "wof", "gpui", "windows"]
+categories = ["gui"]
+
+[package.metadata.winresource]
+ProductName = "RusticGU"
+FileDescription = "RusticGU"
+CompanyName = "JustNak"
+LegalCopyright = "Copyright (c) JustNak"
+OriginalFilename = "rusticgu.exe"
+
+[[bin]]
+name = "rusticgu"
+path = "src/main.rs"
+
+[build-dependencies]
+winresource = "0.1"
+
+[dependencies]
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+async-channel = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "io-std", "net", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls", "http2", "json"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+open = "5"
+image = { version = "0.25", default-features = false, features = ["png"] }
+include_dir = "0.7"
+smallvec = "1"
+raw-window-handle = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Pipes",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Windows NSIS packaging via cargo-packager (v0.11.x).
+# Build: cargo packager --release --formats nsis
+# Or:    powershell -File scripts/package-windows.ps1
+[package.metadata.packager]
+product-name = "RusticGU"
+identifier = "com.rusticgu.app"
+publisher = "JustNak"
+license-file = "LICENSE"
+homepage = "https://github.com/JustNak/RusticGU"
+icons = ["assets/brand/icon.ico", "assets/brand/icon-*.png"]
+formats = ["nsis"]
+out-dir = "dist-release"
+before-packaging-command = "cargo build --release -p rusticgu -p rusticgu-updater"
+binaries = [
+  { path = "rusticgu", main = true },
+  { path = "rusticgu-updater", main = false },
+]
+resources = [
+  "LICENSE",
+  "assets",
+]
+
+[package.metadata.packager.nsis]
+template = "installer/nsis/installer.nsi"
+installer-icon = "assets/brand/icon.ico"
+compression = "lzma"
+appdata-paths = ["$APPDATA/RusticGU"]
