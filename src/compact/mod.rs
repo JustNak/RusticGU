@@ -21,5 +21,6 @@ pub use engine::{
 };
 #[allow(unused_imports)]
 pub use skip::{
-    path_is_auto_excluded, should_skip, skip_reason, title_is_auto_excluded, tree_contains_dstorage,
+    collect_included_files, path_is_auto_excluded, should_skip, skip_reason,
+    title_is_auto_excluded, tree_contains_dstorage,
 };

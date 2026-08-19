@@ -361,7 +361,7 @@ pub fn state_flags_from_acf(text: &str) -> Option<u32> {
 }
 
 /// True when Steam is mid-update for this app (downloading folder or StateFlags).
-pub fn steam_title_is_updating(library_path: &Path, app_id: u32) -> bool {
+pub fn is_steam_title_updating(library_path: &Path, app_id: u32) -> bool {
     if downloading_folder_present(library_path, app_id) {
         return true;
     }
@@ -370,6 +370,12 @@ pub fn steam_title_is_updating(library_path: &Path, app_id: u32) -> bool {
         return false;
     };
     state_flags_from_acf(&text).is_some_and(state_flags_indicate_update)
+}
+
+/// App id when this install folder is a Steam title that is mid-update.
+pub fn steam_updating_app_id(install_path: &Path) -> Option<u32> {
+    let (library, app_id) = steam_context_from_install(install_path)?;
+    is_steam_title_updating(&library, app_id).then_some(app_id)
 }
 
 /// If `install_path` is `…/steamapps/common/<dir>`, resolve its library + appid.
@@ -412,10 +418,7 @@ pub fn steam_context_from_install(install_path: &Path) -> Option<(PathBuf, u32)>
 
 /// True when this install folder belongs to a Steam title that is mid-update.
 pub fn install_is_steam_updating(install_path: &Path) -> bool {
-    match steam_context_from_install(install_path) {
-        Some((library, app_id)) => steam_title_is_updating(&library, app_id),
-        None => false,
-    }
+    steam_updating_app_id(install_path).is_some()
 }
 
 fn push_unique(folders: &mut Vec<PathBuf>, path: PathBuf) {
@@ -564,17 +567,17 @@ mod tests {
 }
 "#;
         std::fs::write(appmanifest_path(&library, 4242), idle_acf).unwrap();
-        assert!(!steam_title_is_updating(&library, 4242));
+        assert!(!is_steam_title_updating(&library, 4242));
         assert!(!install_is_steam_updating(&common));
         assert!(!downloading_folder_present(&library, 4242));
 
         let downloading = library.join("steamapps").join("downloading").join("4242");
         std::fs::create_dir_all(&downloading).unwrap();
         assert!(downloading_folder_present(&library, 4242));
-        assert!(steam_title_is_updating(&library, 4242));
+        assert!(is_steam_title_updating(&library, 4242));
         assert!(install_is_steam_updating(&common));
         let _ = std::fs::remove_dir_all(&downloading);
-        assert!(!steam_title_is_updating(&library, 4242));
+        assert!(!is_steam_title_updating(&library, 4242));
 
         let updating_acf = r#"
 "AppState"
@@ -586,9 +589,80 @@ mod tests {
 }
 "#;
         std::fs::write(appmanifest_path(&library, 4242), updating_acf).unwrap();
-        assert!(steam_title_is_updating(&library, 4242));
+        assert!(is_steam_title_updating(&library, 4242));
         assert!(install_is_steam_updating(&common));
 
+        let _ = std::fs::remove_dir_all(&library);
+    }
+
+    #[test]
+    fn is_steam_title_updating_when_stateflags_updating() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let library = std::env::temp_dir().join(format!(
+            "rusticgu-flags-upd-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(library.join("steamapps")).unwrap();
+        std::fs::write(
+            appmanifest_path(&library, 1026),
+            r#"
+"AppState"
+{
+	"appid"		"1026"
+	"StateFlags"		"1026"
+	"installdir"		"Patching"
+}
+"#,
+        )
+        .unwrap();
+        assert!(is_steam_title_updating(&library, 1026));
+        let _ = std::fs::remove_dir_all(&library);
+    }
+
+    #[test]
+    fn is_steam_title_updating_when_downloading_folder_present() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let library =
+            std::env::temp_dir().join(format!("rusticgu-dl-upd-{}-{}", std::process::id(), stamp));
+        std::fs::create_dir_all(library.join("steamapps").join("downloading").join("77")).unwrap();
+        assert!(downloading_folder_present(&library, 77));
+        assert!(is_steam_title_updating(&library, 77));
+        let _ = std::fs::remove_dir_all(&library);
+    }
+
+    #[test]
+    fn is_steam_title_updating_false_when_fully_installed() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let library = std::env::temp_dir().join(format!(
+            "rusticgu-idle-upd-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(library.join("steamapps")).unwrap();
+        std::fs::write(
+            appmanifest_path(&library, 4),
+            r#"
+"AppState"
+{
+	"appid"		"4"
+	"StateFlags"		"4"
+	"installdir"		"Ready"
+}
+"#,
+        )
+        .unwrap();
+        assert!(!is_steam_title_updating(&library, 4));
+        assert!(!downloading_folder_present(&library, 4));
         let _ = std::fs::remove_dir_all(&library);
     }
 }

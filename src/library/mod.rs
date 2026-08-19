@@ -9,8 +9,8 @@ mod vdf;
 #[allow(unused_imports)]
 pub use steam::{
     collect_library_folders, downloading_folder_present, game_from_acf, install_is_steam_updating,
-    library_paths_from_vdf, state_flags_from_acf, state_flags_indicate_update, steam_path,
-    steam_title_is_updating,
+    is_steam_title_updating, library_paths_from_vdf, state_flags_from_acf,
+    state_flags_indicate_update, steam_path, steam_updating_app_id,
 };
 pub use steam::{scan_steam_library, SteamGame};
 #[allow(unused_imports)]

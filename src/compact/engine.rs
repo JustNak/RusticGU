@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::settings::CompactAlgorithm;
 
-use crate::library::install_is_steam_updating;
+use crate::library::steam_updating_app_id;
 
 use super::command::{build_apply_invocations, build_compact_command, CompactOp};
 use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
@@ -19,7 +19,7 @@ pub enum CompactRefuse {
     RunningExecutable { path: PathBuf },
     DirectStorage { override_allowed: bool },
     AutoExcluded { title: String },
-    SteamUpdating,
+    SteamUpdating { app_id: u32 },
     UnsupportedOs,
     NotNtfs { filesystem: String },
     MissingFolder,
@@ -53,9 +53,9 @@ impl std::fmt::Display for CompactRefuse {
             Self::AutoExcluded { title } => {
                 write!(f, "{title} is auto-excluded from compact.")
             }
-            Self::SteamUpdating => write!(
+            Self::SteamUpdating { app_id } => write!(
                 f,
-                "Steam is updating this title. Compact is blocked until the update finishes."
+                "Steam is updating this title (app {app_id}). Compact is blocked until the update finishes."
             ),
             Self::UnsupportedOs => {
                 write!(
@@ -169,8 +169,8 @@ pub fn preflight(root: &Path, allow_dstorage: bool) -> Result<(), CompactRefuse>
             override_allowed: false,
         });
     }
-    if install_is_steam_updating(root) {
-        return Err(CompactRefuse::SteamUpdating);
+    if let Some(app_id) = steam_updating_app_id(root) {
+        return Err(CompactRefuse::SteamUpdating { app_id });
     }
     Ok(())
 }
@@ -438,10 +438,17 @@ fn interpret_output(op: CompactOp, output: CommandOutput) -> Result<CompactResul
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static COMPACT_SPAWN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn run_compact(
     inv: &super::command::CompactInvocation,
     elevate: bool,
 ) -> Result<CommandOutput, String> {
+    #[cfg(test)]
+    COMPACT_SPAWN_COUNT.with(|c| c.set(c.get().saturating_add(1)));
     #[cfg(windows)]
     {
         windows_run(inv, elevate)
@@ -695,7 +702,71 @@ mod tests {
 
         std::fs::create_dir_all(library.join("steamapps").join("downloading").join("99")).unwrap();
         let err = preflight(&install, false).unwrap_err();
-        assert_eq!(err, CompactRefuse::SteamUpdating);
+        assert_eq!(err, CompactRefuse::SteamUpdating { app_id: 99 });
+
+        COMPACT_SPAWN_COUNT.with(|c| c.set(0));
+        let apply_err = apply_compact(
+            CompactOp::Compress,
+            &install,
+            CompactAlgorithm::Xpress8k,
+            false,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            apply_err.contains("updating"),
+            "apply must refuse before compact.exe: {apply_err}"
+        );
+        assert_eq!(
+            COMPACT_SPAWN_COUNT.with(|c| c.get()),
+            0,
+            "compact.exe must not spawn when Steam is updating"
+        );
+
+        let _ = std::fs::remove_dir_all(&library);
+    }
+
+    #[test]
+    fn apply_compact_refuses_stateflags_updating_without_spawning() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let library = std::env::temp_dir().join(format!(
+            "rusticgu-apply-flags-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        let install = library.join("steamapps").join("common").join("PatchGame");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("game.exe"), b"exe").unwrap();
+        std::fs::write(
+            library.join("steamapps").join("appmanifest_1026.acf"),
+            r#"
+"AppState"
+{
+	"appid"		"1026"
+	"name"		"Patch Game"
+	"StateFlags"		"1026"
+	"installdir"		"PatchGame"
+}
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            preflight(&install, false).unwrap_err(),
+            CompactRefuse::SteamUpdating { app_id: 1026 }
+        );
+        COMPACT_SPAWN_COUNT.with(|c| c.set(0));
+        assert!(apply_compact(
+            CompactOp::Compress,
+            &install,
+            CompactAlgorithm::Xpress8k,
+            false,
+            |_| {},
+        )
+        .is_err());
+        assert_eq!(COMPACT_SPAWN_COUNT.with(|c| c.get()), 0);
 
         let _ = std::fs::remove_dir_all(&library);
     }

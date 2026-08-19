@@ -75,14 +75,34 @@ pub fn build_compact_files_command(
     }
 }
 
-/// Apply-set invocations: included files only, never `compact /C /EXE /S <install_root>`.
+/// Apply-compress invocations: included files only, never `compact /C /EXE /S <install_root>`.
 pub fn build_apply_invocations(
     op: CompactOp,
     root: &Path,
     algorithm: CompactAlgorithm,
 ) -> Vec<CompactInvocation> {
-    let files = collect_included_files(root);
-    batch_apply_files(op, &files, algorithm)
+    match op {
+        CompactOp::Compress => {
+            let files = collect_included_files(root);
+            batch_apply_files(op, &files, algorithm)
+        }
+        CompactOp::Uncompress => vec![build_uncompress_root_command(root)],
+    }
+}
+
+/// Undo may recurse the install root (`/U /EXE /S`). Compress must not.
+pub fn build_uncompress_root_command(root: &Path) -> CompactInvocation {
+    CompactInvocation {
+        program: OsString::from("compact.exe"),
+        args: vec![
+            OsString::from("/U"),
+            OsString::from("/EXE"),
+            OsString::from("/S"),
+            OsString::from("/I"),
+            OsString::from("/Q"),
+            root.as_os_str().to_os_string(),
+        ],
+    }
 }
 
 /// Paths the apply pass will pass to `compact.exe` (skip list already applied).
@@ -237,6 +257,94 @@ mod tests {
             .to_ascii_uppercase()
             .contains("/EXE:XPRESS8K"));
         assert!(!inv.display_cmdline().to_ascii_uppercase().contains("LZX"));
+    }
+
+    #[test]
+    fn apply_compress_command_is_not_recursive_on_install_root() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("rusticgu-qa-nors-{}-{}", std::process::id(), stamp));
+        std::fs::create_dir_all(root.join("SaveGames")).unwrap();
+        std::fs::create_dir_all(root.join("ShaderCache")).unwrap();
+        std::fs::write(root.join("game.exe"), b"exe").unwrap();
+        std::fs::write(root.join("movie.mp4"), b"vid").unwrap();
+        std::fs::write(root.join("archive.zip"), b"zip").unwrap();
+        std::fs::write(root.join("SaveGames").join("slot.sav"), b"save").unwrap();
+        std::fs::write(root.join("ShaderCache").join("x.bin"), b"sh").unwrap();
+
+        let invs = build_apply_invocations(CompactOp::Compress, &root, CompactAlgorithm::Xpress8k);
+        assert!(!invs.is_empty());
+        let mut joined = String::new();
+        for inv in &invs {
+            let line = inv.display_cmdline();
+            joined.push_str(&line);
+            joined.push('\n');
+            assert!(
+                !invocation_recurses_install_root(inv, &root),
+                "compress must not be /S on install root: {line}"
+            );
+            let upper = line.to_ascii_uppercase();
+            assert!(
+                !upper.contains("/S"),
+                "compress apply must not emit /S: {line}"
+            );
+            assert!(is_wof_exe_command(inv));
+        }
+        let lower = joined.replace('\\', "/").to_ascii_lowercase();
+        for forbidden in [
+            "movie.mp4",
+            "slot.sav",
+            "x.bin",
+            "archive.zip",
+            "savegames",
+            "shadercache",
+        ] {
+            assert!(
+                !lower.contains(forbidden),
+                "skipped path {forbidden} must not be a compact target: {joined}"
+            );
+        }
+        assert!(lower.contains("game.exe"), "{joined}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apply_include_set_excludes_should_skip() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-qa-include-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(root.join("SaveGames")).unwrap();
+        std::fs::create_dir_all(root.join("ShaderCache")).unwrap();
+        std::fs::write(root.join("game.exe"), b"exe").unwrap();
+        std::fs::write(root.join("video.mp4"), b"vid").unwrap();
+        std::fs::write(root.join("SaveGames").join("a.sav"), b"save").unwrap();
+        std::fs::write(root.join("ShaderCache").join("c.bin"), b"sh").unwrap();
+        std::fs::write(root.join("foo.log"), b"log").unwrap();
+
+        let included = apply_target_paths(&root);
+        let names: Vec<String> = included
+            .iter()
+            .filter_map(|p| p.file_name()?.to_str().map(|s| s.to_ascii_lowercase()))
+            .collect();
+        assert_eq!(names, vec!["game.exe".to_string()]);
+        for skipped in ["video.mp4", "a.sav", "c.bin", "foo.log"] {
+            assert!(
+                !names.iter().any(|n| n == skipped),
+                "include set must not contain {skipped}: {names:?}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
