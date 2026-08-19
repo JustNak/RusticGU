@@ -1,16 +1,23 @@
 //! Compression policy for the "shelf".
 //!
-//! - Cold / never-played titles → **LZX**
+//! - Cold / **unknown last-played** (`None`) → **LZX** (conservative; never
+//!   fabricate a timestamp — see [`last_played`])
 //! - Recently played titles stay **XPRESS8K**
 //! - Launching a shelved (LZX) title walks back to **XPRESS**
-//! - GW2-class self-rewriters are **excluded** from any compact
+//! - Confirmed self-rewriters (GW2, Secret World Legends, LOTRO) are
+//!   **excluded** from any compact
 //!
 //! Thresholds are named constants / [`ShelfConfig`] with tested defaults.
 
 pub mod denylist;
+pub mod last_played;
 pub mod policy;
 pub mod thresholds;
 
 pub use denylist::{default_denylist, DenyList, DenyRule};
+pub use last_played::{
+    last_played_from_acf, last_played_from_itch_local_last_run_at,
+    last_played_from_steam_localconfig, safe_last_played_source, LastPlayedSource,
+};
 pub use policy::{recommend, recommend_default, CompactPolicy, PolicyInput};
 pub use thresholds::{Recency, ShelfConfig, DEFAULT_COLD_AFTER, DEFAULT_RECENT_WITHIN};

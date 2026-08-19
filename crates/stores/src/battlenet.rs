@@ -6,12 +6,15 @@ use crate::error::{StoreError, StoreWarning};
 use crate::fs::IndexFs;
 use crate::model::{DiscoveredTitle, StoreId};
 
-/// Agent / product codes that are the launcher itself, not games.
-const NOT_GAMES: &[&str] = &["agent", "bna", "battle.net", "catalogs", "bts"];
+/// Agent / Battle.net app — not games. Skip `agent` and `bna` only
+/// (plus the `battle.net` alias of `bna`).
+const NOT_GAMES: &[&str] = &["agent", "bna", "battle.net"];
 
-/// Battle.net Agent product install records. We read JSON indexes only
-/// (`product_installs.json`, `products.json`, or `*.json` catalogs).
-/// Binary `product.db` protobuf is not parsed here (fixture-friendly).
+/// Battle.net Agent `product_installs[]`:
+/// `uid`, `product_code`, `settings.install_path`,
+/// `cached_product_state…installed/playable`.
+///
+/// JSON indexes only (fixture-friendly). Skip `agent` and `bna`.
 pub fn discover(fs: &impl IndexFs, agent_dir: &Path) -> (Vec<DiscoveredTitle>, Vec<StoreWarning>) {
     let mut titles = Vec::new();
     let mut warnings = Vec::new();
@@ -66,21 +69,42 @@ pub fn discover(fs: &impl IndexFs, agent_dir: &Path) -> (Vec<DiscoveredTitle>, V
 struct ProductFile {
     #[serde(default)]
     product_installs: Vec<ProductInstall>,
-    #[serde(default)]
-    products: Vec<ProductInstall>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
 struct ProductInstall {
     #[serde(default)]
     uid: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "productCode")]
     product_code: Option<String>,
     #[serde(default)]
+    settings: Option<ProductSettings>,
+    #[serde(default, alias = "cachedProductState")]
+    cached_product_state: Option<CachedProductState>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ProductSettings {
+    #[serde(default, alias = "installPath")]
     install_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct CachedProductState {
+    #[serde(default, alias = "baseProductState")]
+    base_product_state: Option<BaseProductState>,
     #[serde(default)]
-    title: Option<String>,
+    installed: Option<bool>,
+    #[serde(default)]
+    playable: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct BaseProductState {
+    #[serde(default)]
+    installed: Option<bool>,
+    #[serde(default)]
+    playable: Option<bool>,
 }
 
 fn read_product_json(fs: &impl IndexFs, path: &Path) -> Result<Vec<DiscoveredTitle>, StoreError> {
@@ -88,11 +112,7 @@ fn read_product_json(fs: &impl IndexFs, path: &Path) -> Result<Vec<DiscoveredTit
     let parsed: ProductFile =
         serde_json::from_str(&text).map_err(|e| StoreError::parse(path, e.to_string()))?;
     let mut out = Vec::new();
-    for p in parsed
-        .product_installs
-        .into_iter()
-        .chain(parsed.products)
-    {
+    for p in parsed.product_installs {
         let code = p
             .product_code
             .as_deref()
@@ -101,19 +121,42 @@ fn read_product_json(fs: &impl IndexFs, path: &Path) -> Result<Vec<DiscoveredTit
         if NOT_GAMES.iter().any(|n| code.eq_ignore_ascii_case(n)) {
             continue;
         }
-        let install = p.install_path.unwrap_or_default();
+        let install = p
+            .settings
+            .as_ref()
+            .and_then(|s| s.install_path.clone())
+            .unwrap_or_default();
         if install.trim().is_empty() {
             continue;
         }
-        let title = p.title.unwrap_or_else(|| pretty_bnet(code));
-        out.push(DiscoveredTitle {
-            store: StoreId::Battlenet,
-            title,
-            install_path: install.into(),
-            launcher_id: p.uid.or(p.product_code),
-        });
+        let (installed, playable) = product_flags(&p.cached_product_state);
+        if installed == Some(false) {
+            continue;
+        }
+        let mut t = DiscoveredTitle::new(
+            StoreId::Battlenet,
+            pretty_bnet(code),
+            install,
+            p.uid.or(p.product_code),
+        );
+        t.installed = installed;
+        t.playable = playable;
+        out.push(t);
     }
     Ok(out)
+}
+
+fn product_flags(state: &Option<CachedProductState>) -> (Option<bool>, Option<bool>) {
+    let Some(s) = state else {
+        return (None, None);
+    };
+    let installed = s
+        .installed
+        .or_else(|| s.base_product_state.as_ref().and_then(|b| b.installed));
+    let playable = s
+        .playable
+        .or_else(|| s.base_product_state.as_ref().and_then(|b| b.playable));
+    (installed, playable)
 }
 
 fn pretty_bnet(code: &str) -> String {

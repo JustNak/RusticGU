@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::error::WatchResult;
+use crate::skip::is_compact_candidate;
 
 /// Compact state of one file in an install tree.
 /// The real WOF query lives in Engineer 3's crate; we only consume this.
@@ -33,6 +34,7 @@ impl IncrementalPlan {
     pub fn from_inventory(title_id: impl Into<String>, files: &[InstallFile]) -> Self {
         let files = files
             .iter()
+            .filter(|f| is_compact_candidate(&f.relative_path))
             .filter(|f| {
                 f.appeared_after_lock || matches!(f.compact, FileCompactState::Uncompressed)
             })

@@ -4,10 +4,12 @@
 //! 1. Epic Manifests (`ProgramData/Epic/EpicGamesLauncher/Data/Manifests`)
 //! 2. GOG HKLM `SOFTWARE\WOW6432Node\GOG.com\Games` (and non-WOW)
 //! 3. EA Desktop / Origin local content + JSON catalog
-//! 4. Ubisoft Connect registry `Installs` + optional JSON list
-//! 5. Riot Client `Metadata/*.product_settings.yaml`
-//! 6. Battle.net Agent JSON product records
-//! 7. itch app/install indexes (`preferences.json`, `library.json`, receipts)
+//! 4. Ubisoft Connect registry `Installs\{id}` (InstallDir + Language);
+//!    never `configurations/ownership`
+//! 5. Riot Client `Metadata` (`product_install_full_path` or leftover
+//!    `product_install_root`; `update-status.json` is patch state)
+//! 6. Battle.net Agent `product_installs[]` (skip `agent` / `bna`)
+//! 7. itch butlerd `Fetch.Caves` only (never `butler.db`)
 //! 8. GDK / XboxGames — **opt-in only**
 //!
 //! Hard safety:

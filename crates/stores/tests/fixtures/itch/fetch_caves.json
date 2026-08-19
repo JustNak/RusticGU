@@ -1,0 +1,10 @@
+{
+  "caves": [
+    {
+      "id": "cave-celeste",
+      "game": { "title": "Celeste", "id": 191125 },
+      "installInfo": { "installFolder": "C:/itch/apps/Celeste" },
+      "stats": { "localLastRunAt": 1700000000 }
+    }
+  ]
+}

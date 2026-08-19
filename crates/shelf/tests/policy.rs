@@ -72,14 +72,30 @@ fn gw2_is_excluded_case_insensitive() {
 }
 
 #[test]
-fn warframe_is_excluded_as_self_rewriter() {
-    let policy = decide(PolicyInput::new("Warframe"));
-    match policy {
-        CompactPolicy::Exclude { reason } => {
-            assert!(reason.to_ascii_lowercase().contains("warframe"));
+fn secret_world_legends_and_lotro_are_excluded() {
+    for name in ["Secret World Legends", "secret world legends"] {
+        match decide(PolicyInput::new(name)) {
+            CompactPolicy::Exclude { reason } => {
+                assert!(reason.to_ascii_lowercase().contains("secret world"));
+            }
+            other => panic!("{name} should be excluded, got {other:?}"),
         }
-        other => panic!("Warframe should be excluded, got {other:?}"),
     }
+    for name in ["The Lord of the Rings Online", "LOTRO", "lord of the rings online"] {
+        match decide(PolicyInput::new(name)) {
+            CompactPolicy::Exclude { reason } => {
+                assert!(reason.to_ascii_lowercase().contains("lotro") || reason.contains("Rings"));
+            }
+            other => panic!("{name} should be excluded, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn ark_and_eso_are_not_default_excluded() {
+    assert_eq!(decide(PolicyInput::new("ARK: Survival Evolved")), CompactPolicy::Lzx);
+    assert_eq!(decide(PolicyInput::new("The Elder Scrolls Online")), CompactPolicy::Lzx);
+    assert_eq!(decide(PolicyInput::new("Warframe")), CompactPolicy::Lzx);
 }
 
 #[test]

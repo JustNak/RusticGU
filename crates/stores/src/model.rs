@@ -38,12 +38,50 @@ impl std::fmt::Display for StoreId {
 /// One installed title as reported by a single launcher index.
 /// Dual-registered titles (e.g. Epic + GOG) appear twice; this crate does
 /// not cross-store dedupe.
+///
+/// `last_played_unix` is filled **only** from itch `CaveStats.localLastRunAt`.
+/// Epic / GOG / Xbox / Battle.net / EA / Ubisoft / Riot stay `None` — there
+/// is no safe last-play signal (do not use mtime / INSTALLDATE).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredTitle {
     pub store: StoreId,
     pub title: String,
     pub install_path: PathBuf,
     pub launcher_id: Option<String>,
+    /// Ubisoft `Installs\{id}\Language`.
+    pub language: Option<String>,
+    /// Riot leftover: `product_install_full_path` missing, used `product_install_root`.
+    pub leftover: bool,
+    /// Riot `update-status.json` patch state (not last-played).
+    pub patch_state: Option<String>,
+    /// Battle.net `cached_product_state…installed`.
+    pub installed: Option<bool>,
+    /// Battle.net `cached_product_state…playable`.
+    pub playable: Option<bool>,
+    /// itch `CaveStats.localLastRunAt` only. All other stores: `None`.
+    pub last_played_unix: Option<u64>,
+}
+
+impl DiscoveredTitle {
+    pub fn new(
+        store: StoreId,
+        title: impl Into<String>,
+        install_path: impl Into<PathBuf>,
+        launcher_id: Option<String>,
+    ) -> Self {
+        Self {
+            store,
+            title: title.into(),
+            install_path: install_path.into(),
+            launcher_id,
+            language: None,
+            leftover: false,
+            patch_state: None,
+            installed: None,
+            playable: None,
+            last_played_unix: None,
+        }
+    }
 }
 
 /// Discovery knobs. GDK / XboxGames is **opt-in**; default is off.

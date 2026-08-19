@@ -68,10 +68,10 @@ fn parse_manifest(fs: &impl IndexFs, path: &Path) -> StoreResult<Option<Discover
         .catalog_item_id
         .filter(|s| !s.is_empty())
         .or(m.app_name.filter(|s| !s.is_empty()));
-    Ok(Some(DiscoveredTitle {
-        store: StoreId::Epic,
-        title: title.trim().to_string(),
-        install_path: install.into(),
+    Ok(Some(DiscoveredTitle::new(
+        StoreId::Epic,
+        title.trim(),
+        install,
         launcher_id,
-    }))
+    )))
 }

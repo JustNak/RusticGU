@@ -69,12 +69,12 @@ fn read_game(
             .or_else(|| extract_xml_value(&text, "DisplayName"))
             .unwrap_or_else(|| folder_name.to_string());
         let launcher_id = extract_xml_value(&text, "Name");
-        return Ok(Some(DiscoveredTitle {
-            store: StoreId::XboxGames,
+        return Ok(Some(DiscoveredTitle::new(
+            StoreId::XboxGames,
             title,
-            install_path: dir.to_path_buf(),
+            dir,
             launcher_id,
-        }));
+        )));
     }
     Ok(None)
 }

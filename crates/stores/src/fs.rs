@@ -48,7 +48,19 @@ pub fn reject_forbidden(path: &Path) -> StoreResult<()> {
             "WindowsApps is forbidden (no takeown / package walks)",
         ));
     }
+    if is_ubisoft_ownership_path(path) {
+        return Err(StoreError::forbidden(
+            path,
+            "Ubisoft configurations/ownership must never be read",
+        ));
+    }
     Ok(())
+}
+
+/// Ubisoft Connect `configurations/ownership` (and AppData `cache/ownership`).
+pub fn is_ubisoft_ownership_path(path: &Path) -> bool {
+    let n = normalize_path_key(path).to_ascii_lowercase();
+    n.contains("configurations/ownership") || n.contains("cache/ownership")
 }
 
 /// Real OS filesystem. Safe for Linux tests that point at fixture trees.
@@ -84,6 +96,7 @@ impl IndexFs for StdFs {
             let child = ent.path();
             if file_name_eq_ignore_case(&child, "butler.db")
                 || path_contains_component(&child, "WindowsApps")
+                || is_ubisoft_ownership_path(&child)
             {
                 continue;
             }
@@ -224,6 +237,7 @@ impl IndexFs for MemoryFs {
             let child = path.join(&name);
             if file_name_eq_ignore_case(&child, "butler.db")
                 || path_contains_component(&child, "WindowsApps")
+                || is_ubisoft_ownership_path(&child)
             {
                 continue;
             }
@@ -288,6 +302,10 @@ impl<F: IndexFs> IndexFs for RecordingFs<F> {
 
 pub fn never_opened_butler_db(paths: &[PathBuf]) -> bool {
     !paths.iter().any(|p| file_name_eq_ignore_case(p, "butler.db"))
+}
+
+pub fn never_opened_ubisoft_ownership(paths: &[PathBuf]) -> bool {
+    !paths.iter().any(|p| is_ubisoft_ownership_path(p))
 }
 
 impl<T: IndexFs + ?Sized> IndexFs for &T {

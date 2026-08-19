@@ -3,7 +3,8 @@ use std::time::Duration;
 /// Games played within this window stay on the fast-to-page-in algorithm.
 pub const DEFAULT_RECENT_WITHIN: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// Games idle this long (or never played) are treated as cold / LZX shelf.
+/// Games idle this long, **or with unknown last-played (`None`)**, are
+/// treated as cold / LZX. `None` is conservative, not a fake timestamp.
 pub const DEFAULT_COLD_AFTER: Duration = Duration::from_secs(21 * 24 * 60 * 60);
 
 #[derive(Debug, Clone, PartialEq, Eq)]

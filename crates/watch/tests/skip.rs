@@ -1,0 +1,75 @@
+//! Skip-ext and folder-skip for incremental recompact candidates.
+
+use std::path::PathBuf;
+
+use watch::{
+    is_compact_candidate, FileCompactState, IncrementalPlan, InstallFile, ELIGIBLE_EXTENSIONS,
+};
+
+fn file(path: &str, uncompressed: bool) -> InstallFile {
+    InstallFile {
+        relative_path: PathBuf::from(path),
+        compact: if uncompressed {
+            FileCompactState::Uncompressed
+        } else {
+            FileCompactState::Compressed
+        },
+        appeared_after_lock: uncompressed,
+    }
+}
+
+#[test]
+fn wav_dds_bnk_and_containers_eligible_media_skipped() {
+    for ext in ELIGIBLE_EXTENSIONS {
+        assert!(
+            is_compact_candidate(&PathBuf::from(format!("asset.{ext}"))),
+            "{ext}"
+        );
+    }
+    let plan = IncrementalPlan::from_inventory(
+        "570",
+        &[
+            file("voice.wav", true),
+            file("albedo.dds", true),
+            file("events.bnk", true),
+            file("dir/game.vpk", true),
+            file("data.pak", true),
+            file("Foo.uasset", true),
+            file("cutscene.mp4", true),
+            file("voice.wem", true),
+            file("tex.ktx2", true),
+            file("pack.zst", true),
+            file("debug.log", true),
+        ],
+    );
+    let names: Vec<_> = plan
+        .files
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
+    assert!(names.iter().any(|n| n.ends_with(".wav")));
+    assert!(names.iter().any(|n| n.ends_with(".dds")));
+    assert!(names.iter().any(|n| n.ends_with(".bnk")));
+    assert!(names.iter().any(|n| n.ends_with(".vpk")));
+    assert!(names.iter().any(|n| n.ends_with(".pak")));
+    assert!(names.iter().any(|n| n.ends_with(".uasset")));
+    assert!(!names.iter().any(|n| n.ends_with(".mp4")));
+    assert!(!names.iter().any(|n| n.ends_with(".wem")));
+    assert!(!names.iter().any(|n| n.ends_with(".ktx2")));
+    assert!(!names.iter().any(|n| n.ends_with(".zst")));
+    assert!(!names.iter().any(|n| n.ends_with(".log")));
+}
+
+#[test]
+fn shadercache_and_pipeline_folders_skipped() {
+    let plan = IncrementalPlan::from_inventory(
+        "570",
+        &[
+            file(r"game\pak01.vpk", true),
+            file(r"ShaderCache\ps.bin", true),
+            file(r"Saved\PipelineCaches\pso", true),
+            file(r"E:\SteamLibrary\steamapps\shadercache\570\c.cache", true),
+        ],
+    );
+    assert_eq!(plan.files, vec![PathBuf::from(r"game\pak01.vpk")]);
+}

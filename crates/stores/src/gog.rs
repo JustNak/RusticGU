@@ -51,10 +51,10 @@ fn read_game(hive: &impl RegistryHive, key: &str, fallback_id: &str) -> Option<D
     .unwrap_or_else(|| fallback_id.to_string());
     let launcher_id = first_value(hive, key, &["gameID", "gameId", "productID", "productId"])
         .or_else(|| Some(fallback_id.to_string()));
-    Some(DiscoveredTitle {
-        store: StoreId::Gog,
-        title: name,
-        install_path: PathBuf::from(path),
+    Some(DiscoveredTitle::new(
+        StoreId::Gog,
+        name,
+        PathBuf::from(path),
         launcher_id,
-    })
+    ))
 }

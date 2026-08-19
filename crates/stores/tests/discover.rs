@@ -58,6 +58,11 @@ fn gog_and_ubi_hive() -> MemoryHive {
         "InstallDir",
         r"C:\Ubisoft\Rayman Origins",
     );
+    hive.set_value(
+        r"SOFTWARE\WOW6432Node\Ubisoft\Launcher\Installs\80",
+        "Language",
+        "en-US",
+    );
     hive
 }
 
@@ -138,20 +143,33 @@ fn ea_origin_and_desktop_index() {
 }
 
 #[test]
-fn ubisoft_registry_and_json_index() {
-    let report = discover_all(
-        &StdFs,
-        &gog_and_ubi_hive(),
-        &full_roots(),
-        &DiscoverOptions::default(),
-    );
+fn ubisoft_installs_language_and_never_touches_ownership() {
+    let rec = RecordingFs::new(StdFs);
+    let report = StoreProbe::new(&rec, gog_and_ubi_hive(), full_roots())
+        .discover_all(&DiscoverOptions::default());
     let ubi: Vec<_> = report.titles_for(StoreId::Ubisoft).collect();
-    assert!(ubi.iter().any(|t| t.launcher_id.as_deref() == Some("80")));
+    let rayman = ubi
+        .iter()
+        .find(|t| t.launcher_id.as_deref() == Some("80"))
+        .expect("Installs\\{id}");
+    assert_eq!(rayman.language.as_deref(), Some("en-US"));
     assert!(ubi.iter().any(|t| t.title.contains("Valhalla")));
+
+    let opened = rec.opened_paths();
+    assert!(
+        stores::fs::never_opened_ubisoft_ownership(&opened),
+        "ownership must not be opened: {opened:?}"
+    );
+    let ownership = fixtures().join("ubisoft/cache/ownership/user.bin");
+    assert!(ownership.is_file());
+    assert!(matches!(
+        StdFs.read_to_string(&ownership).unwrap_err(),
+        stores::StoreError::Forbidden { .. }
+    ));
 }
 
 #[test]
-fn riot_reads_installed_yaml_skips_uninstalled_leftover() {
+fn riot_leftover_uses_product_install_root() {
     let report = discover_all(
         &StdFs,
         &MemoryHive::new(),
@@ -159,19 +177,26 @@ fn riot_reads_installed_yaml_skips_uninstalled_leftover() {
         &DiscoverOptions::default(),
     );
     let riot: Vec<_> = report.titles_for(StoreId::Riot).collect();
-    assert!(
-        riot.iter().any(|t| t.launcher_id.as_deref() == Some("valorant.live")),
-        "{riot:?}"
-    );
-    assert!(
-        riot.iter()
-            .all(|t| t.launcher_id.as_deref() != Some("league_of_legends.live")),
-        "uninstalled leftover must be skipped: {riot:?}"
-    );
+    let valorant = riot
+        .iter()
+        .find(|t| t.launcher_id.as_deref() == Some("valorant.live"))
+        .expect("valorant");
+    assert!(!valorant.leftover);
+    assert_eq!(valorant.patch_state.as_deref(), Some("up_to_date"));
+
+    let leftover = riot
+        .iter()
+        .find(|t| t.launcher_id.as_deref() == Some("league_of_legends.live"))
+        .expect("leftover without full_path should still be listed");
+    assert!(leftover.leftover);
+    assert!(leftover
+        .install_path
+        .to_string_lossy()
+        .contains("Riot Games"));
 }
 
 #[test]
-fn battlenet_skips_agent_product() {
+fn battlenet_skips_agent_and_bna() {
     let report = discover_all(
         &StdFs,
         &MemoryHive::new(),
@@ -182,16 +207,25 @@ fn battlenet_skips_agent_product() {
     assert_eq!(bn.len(), 1, "{bn:?}");
     assert_eq!(bn[0].title, "World of Warcraft");
     assert_eq!(bn[0].launcher_id.as_deref(), Some("wow"));
+    assert_eq!(bn[0].installed, Some(true));
+    assert_eq!(bn[0].playable, Some(true));
+    assert!(bn.iter().all(|t| {
+        t.launcher_id.as_deref() != Some("agent") && t.launcher_id.as_deref() != Some("bna")
+    }));
 }
 
 #[test]
-fn itch_uses_library_index_and_never_opens_butler_db() {
+fn itch_fetch_caves_only_and_never_opens_butler_db() {
     let fx = fixtures();
     let rec = RecordingFs::new(StdFs);
     let roots = full_roots();
     let report = StoreProbe::new(&rec, MemoryHive::new(), roots).discover_all(&DiscoverOptions::default());
     let itch: Vec<_> = report.titles_for(StoreId::Itch).collect();
     assert!(itch.iter().any(|t| t.title == "Celeste"), "{itch:?}");
+    assert_eq!(
+        itch.iter().find(|t| t.title == "Celeste").unwrap().last_played_unix,
+        Some(1700000000)
+    );
 
     let opened = rec.opened_paths();
     assert!(
@@ -241,4 +275,26 @@ fn butler_db_read_is_forbidden_even_if_asked() {
     let path = fixtures().join("itch/butler.db");
     let err = StdFs.read_to_string(&path).unwrap_err();
     assert!(matches!(err, stores::StoreError::Forbidden { .. }));
+}
+
+#[test]
+fn last_played_only_itch_caves_other_stores_stay_none() {
+    let report = discover_all(
+        &StdFs,
+        &gog_and_ubi_hive(),
+        &full_roots(),
+        &DiscoverOptions {
+            include_xbox_games: true,
+        },
+    );
+    for t in &report.titles {
+        match t.store {
+            StoreId::Itch => assert!(t.last_played_unix.is_some(), "{t:?}"),
+            _ => assert!(
+                t.last_played_unix.is_none(),
+                "{:?} must not invent last-played: {t:?}",
+                t.store
+            ),
+        }
+    }
 }

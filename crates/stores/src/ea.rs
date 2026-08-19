@@ -97,12 +97,7 @@ fn parse_mfst(fs: &impl IndexFs, path: &Path) -> StoreResult<Option<DiscoveredTi
                 .map(|n| n.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| "Unknown EA title".into());
-    Ok(Some(DiscoveredTitle {
-        store: StoreId::Ea,
-        title,
-        install_path: install.into(),
-        launcher_id: id,
-    }))
+    Ok(Some(DiscoveredTitle::new(StoreId::Ea, title, install, id)))
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,12 +154,7 @@ fn discover_ea_index(fs: &impl IndexFs, path: &Path) -> StoreResult<Vec<Discover
             .or(g.base_slug)
             .unwrap_or_else(|| "Unknown EA title".into());
         let launcher_id = g.software_id.or(g.content_id);
-        out.push(DiscoveredTitle {
-            store: StoreId::Ea,
-            title,
-            install_path: install.into(),
-            launcher_id,
-        });
+        out.push(DiscoveredTitle::new(StoreId::Ea, title, install, launcher_id));
     }
     Ok(out)
 }

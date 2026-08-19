@@ -10,12 +10,16 @@
 //! decide *when* and *which paths*.
 //!
 //! See [`flags`] for the Open Steamworks `EAppState` bits treated as patching.
+//! See [`skip`] for extension/folder compact skips and [`dstorage`] for the
+//! dual-DLL DirectStorage hint (presence ≠ actual use).
 
 pub mod acf;
 pub mod compact;
+pub mod dstorage;
 pub mod error;
 pub mod flags;
 pub mod machine;
+pub mod skip;
 pub mod status;
 
 pub use compact::{
@@ -27,5 +31,10 @@ pub use flags::{
     PatchingSignals, ACTIVE_POLL_INTERVAL_SECS, DOWNLOADING, FULLY_INSTALLED, IDLE_POLL_INTERVAL_SECS,
     PATCHING_BITS, UPDATE_REQUIRED, UPDATE_STARTED, VALIDATING,
 };
+pub use dstorage::{detect_direct_storage, DirectStorageHint, DSTORAGE_CORE_DLL, DSTORAGE_DLL};
 pub use machine::{FsWatchGate, LiveWatch, TickEvent};
+pub use skip::{
+    extension_is_skipped, folder_is_skipped, is_compact_candidate, is_steam_shadercache_path,
+    ELIGIBLE_EXTENSIONS, SKIP_EXTENSIONS, SKIP_FOLDER_SEGMENTS,
+};
 pub use status::{title_from_acf, title_from_acf_text, MemorySteam, SteamStatus, TitleStatus};

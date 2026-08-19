@@ -81,19 +81,14 @@ fn folder_match(install: Option<&Path>, markers: &[String]) -> bool {
         .any(|name| markers.iter().any(|m| name.eq_ignore_ascii_case(m)))
 }
 
-/// Default denylist for games that rewrite their own files.
+/// Confirmed default denylist — researcher-locked.
 ///
-/// Compacting these is harmful: the next self-patch / repair writes through
-/// WOF-compressed files, causing repair loops and launch failures.
+/// * **Guild Wars 2** — ArenaNet self-rewriter (`Gw2-64` / `local.dat`).
+/// * **Secret World Legends** — Funcom self-updating client (confirmed).
+/// * **The Lord of the Rings Online** — patcher freezes if files stay
+///   WOF-compressed; must decompress to patch (must-not-stay-compressed).
 ///
-/// * **Guild Wars 2** — ArenaNet's `Gw2-64.exe` / local.dat rewriter. Famous
-///   WOF foot-gun; every patch mutates large chunks of the install.
-/// * **Warframe** — Digital Extremes launcher / `Cache.Windows` self-patcher
-///   constantly rewrites package files outside Steam's ACF lifecycle.
-/// * **Destiny 2** — Bungie Tiger engine keep-alive / depot rewrites while
-///   "idle".
-/// * **Path of Exile** — GGG `Content.ggpk` / stand-alone patcher.
-/// * **Star Citizen** — RSI installer writes continuously into `StarCitizen`.
+/// **Not** on the default list: ARK, ESO (unconfirmed). Do not add them here.
 pub fn default_denylist() -> DenyList {
     DenyList {
         rules: vec![
@@ -105,29 +100,31 @@ pub fn default_denylist() -> DenyList {
                 folder_markers: vec!["Guild Wars 2".into(), "Gw2".into(), "GW2".into()],
             },
             DenyRule {
-                reason: "Warframe Digital Extremes self-patcher (Cache.Windows)"
+                reason: "Secret World Legends Funcom self-updating client".into(),
+                names: vec![
+                    "Secret World Legends".into(),
+                    "The Secret World".into(),
+                ],
+                ids: vec!["376480".into(), "steam:376480".into()],
+                folder_markers: vec![
+                    "Secret World Legends".into(),
+                    "SecretWorldLegends".into(),
+                ],
+            },
+            DenyRule {
+                reason: "LOTRO patcher freezes on WOF-compressed files; decompress to patch"
                     .into(),
-                names: vec!["Warframe".into()],
-                ids: vec!["230410".into(), "steam:230410".into()],
-                folder_markers: vec!["Warframe".into()],
-            },
-            DenyRule {
-                reason: "Destiny 2 Tiger engine keep-alive / depot rewrites".into(),
-                names: vec!["Destiny 2".into()],
-                ids: vec!["1085660".into()],
-                folder_markers: vec!["Destiny 2".into(), "Destiny2".into()],
-            },
-            DenyRule {
-                reason: "Path of Exile GGG Content.ggpk self-patcher".into(),
-                names: vec!["Path of Exile".into(), "Path of Exile 2".into()],
-                ids: vec!["238960".into(), "2694490".into()],
-                folder_markers: vec!["Path of Exile".into(), "PathOfExile".into()],
-            },
-            DenyRule {
-                reason: "Star Citizen RSI launcher continuous writes".into(),
-                names: vec!["Star Citizen".into()],
-                ids: vec![],
-                folder_markers: vec!["StarCitizen".into(), "Star Citizen".into()],
+                names: vec![
+                    "The Lord of the Rings Online".into(),
+                    "Lord of the Rings Online".into(),
+                    "LOTRO".into(),
+                ],
+                ids: vec!["212500".into(), "steam:212500".into()],
+                folder_markers: vec![
+                    "The Lord of the Rings Online".into(),
+                    "Lord of the Rings Online".into(),
+                    "LOTRO".into(),
+                ],
             },
         ],
     }
@@ -148,5 +145,16 @@ mod tests {
         assert!(d
             .match_title("Hades", None, None, Some(Path::new(r"C:\Games\Hades")))
             .is_none());
+    }
+
+    #[test]
+    fn ark_and_eso_are_not_default_excluded() {
+        let d = default_denylist();
+        assert!(d.match_title("ARK: Survival Evolved", None, None, None).is_none());
+        assert!(d.match_title("ARK", None, None, None).is_none());
+        assert!(d
+            .match_title("The Elder Scrolls Online", None, None, None)
+            .is_none());
+        assert!(d.match_title("ESO", None, None, None).is_none());
     }
 }

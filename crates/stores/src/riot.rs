@@ -9,8 +9,11 @@ use crate::model::{DiscoveredTitle, StoreId};
 use crate::util::{parse_simple_yaml_map, yaml_value};
 
 /// Riot Client product metadata under `ProgramData/Riot Games/Metadata`
-/// plus `RiotClientInstalls.json`. Uninstalled leftovers (no
-/// `product_install_full_path`) are skipped.
+/// plus `RiotClientInstalls.json`.
+///
+/// Install path: `product_install_full_path`, or leftover
+/// `product_install_root` when the full path is missing.
+/// `update-status.json` is **patch state**, not last-played.
 pub fn discover(
     fs: &impl IndexFs,
     metadata_dir: Option<&Path>,
@@ -26,8 +29,6 @@ pub fn discover(
     if let Some(path) = installs_json {
         match read_installs_json(fs, path) {
             Ok(t) => {
-                // Client path is not a game; only record associated products
-                // that were not already found via metadata.
                 let existing: std::collections::BTreeSet<_> = titles
                     .iter()
                     .filter_map(|x| x.launcher_id.clone())
@@ -74,6 +75,10 @@ fn discover_metadata(fs: &impl IndexFs, dir: &Path) -> (Vec<DiscoveredTitle>, Ve
                 continue;
             }
         };
+        let patch_state = files
+            .iter()
+            .find(|f| !f.is_dir && f.name.eq_ignore_ascii_case("update-status.json"))
+            .and_then(|f| read_update_status(fs, &f.path).ok().flatten());
         for f in files {
             if f.is_dir {
                 continue;
@@ -82,7 +87,7 @@ fn discover_metadata(fs: &impl IndexFs, dir: &Path) -> (Vec<DiscoveredTitle>, Ve
             if !(n.ends_with(".yaml") || n.ends_with(".yml")) {
                 continue;
             }
-            match parse_product_settings(fs, &f.path, &prod.name) {
+            match parse_product_settings(fs, &f.path, &prod.name, patch_state.clone()) {
                 Ok(Some(t)) => titles.push(t),
                 Ok(None) => {}
                 Err(err) => warnings.push(StoreWarning::new(StoreId::Riot, err.to_string())),
@@ -96,19 +101,44 @@ fn parse_product_settings(
     fs: &impl IndexFs,
     path: &Path,
     product_folder: &str,
+    patch_state: Option<String>,
 ) -> crate::error::StoreResult<Option<DiscoveredTitle>> {
     let text = fs.read_to_string(path)?;
     let pairs = parse_simple_yaml_map(&text);
-    let Some(install) = yaml_value(&pairs, "product_install_full_path") else {
-        return Ok(None);
+    let full = yaml_value(&pairs, "product_install_full_path");
+    let root = yaml_value(&pairs, "product_install_root");
+    let (install, leftover) = match (full, root) {
+        (Some(full), _) => (full.to_string(), false),
+        (None, Some(root)) => (root.to_string(), true),
+        (None, None) => return Ok(None),
     };
     let title = pretty_riot_name(product_folder);
-    Ok(Some(DiscoveredTitle {
-        store: StoreId::Riot,
+    let mut t = DiscoveredTitle::new(
+        StoreId::Riot,
         title,
-        install_path: install.into(),
-        launcher_id: Some(product_folder.to_string()),
-    }))
+        install,
+        Some(product_folder.to_string()),
+    );
+    t.leftover = leftover;
+    t.patch_state = patch_state;
+    Ok(Some(t))
+}
+
+fn read_update_status(fs: &impl IndexFs, path: &Path) -> crate::error::StoreResult<Option<String>> {
+    let text = fs.read_to_string(path)?;
+    let v: Value =
+        serde_json::from_str(&text).map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
+    let status = v
+        .get("status")
+        .or_else(|| v.get("state"))
+        .or_else(|| v.get("patchState"))
+        .or_else(|| v.get("patch_state"))
+        .and_then(|x| match x {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        });
+    Ok(status)
 }
 
 fn pretty_riot_name(folder: &str) -> String {
@@ -158,12 +188,7 @@ fn read_installs_json(
             if name.eq_ignore_ascii_case("Riot Client") {
                 continue;
             }
-            out.push(DiscoveredTitle {
-                store: StoreId::Riot,
-                title: name,
-                install_path: game_path.into(),
-                launcher_id: None,
-            });
+            out.push(DiscoveredTitle::new(StoreId::Riot, name, game_path.as_str(), None));
         }
     }
     Ok(out)

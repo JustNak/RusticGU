@@ -58,7 +58,13 @@ impl<'a> PolicyInput<'a> {
     }
 }
 
-/// Recommend a compact policy. Never unwraps; missing last-played is cold.
+/// Recommend a compact policy. Never unwraps.
+///
+/// **Unknown last-played (`None`) is conservative cold / LZX**, not a
+/// fabricated recency. Only Steam `LastPlayed` and itch `localLastRunAt`
+/// may fill `last_played`. Other stores stay `None` and therefore LZX
+/// (unless excluded or launching an LZX-shelved title, which walks back
+/// to XPRESS). Never invent a timestamp from mtime / INSTALLDATE.
 pub fn recommend(
     input: &PolicyInput<'_>,
     now: SystemTime,
