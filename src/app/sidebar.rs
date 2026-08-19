@@ -28,6 +28,15 @@ impl LibraryApp {
             .border_color(theme.sidebar_border)
             .p_3()
             .gap_0p5()
+            .child(
+                div()
+                    .px_2()
+                    .pb_1()
+                    .text_xs()
+                    .font_semibold()
+                    .text_color(theme.primary.opacity(0.85))
+                    .child("LIBRARY"),
+            )
             .child(nav_item(
                 FilterKind::Library.label(),
                 FilterKind::Library,

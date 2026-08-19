@@ -67,7 +67,7 @@ Settings and window state live under `%APPDATA%\RusticGU\`. Uninstall via Apps &
 
 RusticGU is a **game-library compact tool** for Windows. It uses transparent WOF `compact /EXE` so titles stay playable. It is not LZNT1, not a rewriter, and not for WindowsApps. There is no savings-% promise.
 
-- Dark launcher-card UI (Rust + [GPUI](https://gpui.rs/) + [gpui-component](https://github.com/longbridge/gpui-component))
+- Game-launcher UI — teal-cyan + gold chrome (Rust + [GPUI](https://gpui.rs/) + [gpui-component](https://github.com/longbridge/gpui-component))
 - Steam library cards (logical vs on-disk size when cheap to read)
 - Compact / uncompact a selected game folder (default **XPRESS8K**)
 - Tray flyout: compact vs inflated summary, pause Live Compact, one-click recompact, open main window

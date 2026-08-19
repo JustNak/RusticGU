@@ -25,9 +25,7 @@ pub(crate) fn nav_item(
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
     let bg = if active {
-        theme
-            .secondary
-            .opacity(if theme.is_dark() { 0.55 } else { 0.85 })
+        theme.list_active
     } else {
         theme.transparent
     };
@@ -42,14 +40,15 @@ pub(crate) fn nav_item(
         theme.muted_foreground
     };
     let count_color = if active {
-        theme.muted_foreground
+        theme.sidebar_primary
     } else {
-        theme.sidebar_foreground.opacity(0.9)
+        theme.muted_foreground
     };
 
     h_flex()
         .id(SharedString::from(format!("nav-{label}")))
-        .h(px(36.))
+        .relative()
+        .h(px(38.))
         .px_2()
         .gap_2()
         .items_center()
@@ -57,24 +56,34 @@ pub(crate) fn nav_item(
         .bg(bg)
         .hover(|s| {
             s.bg(if active {
-                theme
-                    .secondary
-                    .opacity(if theme.is_dark() { 0.65 } else { 0.95 })
+                theme.list_active
             } else {
-                theme.secondary.opacity(0.45)
+                theme.secondary.opacity(0.5)
             })
         })
         .cursor_pointer()
         .on_click(cx.listener(move |this, _, window, cx| {
             this.select_filter(filter, window, cx);
         }))
+        .when(active, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(8.))
+                    .bottom(px(8.))
+                    .w(px(3.))
+                    .rounded_full()
+                    .bg(theme.primary),
+            )
+        })
         .child(match filter.nav_icon_path() {
             Some(path) => Icon::empty()
                 .path(path)
-                .with_size(px(15.))
+                .with_size(px(16.))
                 .text_color(icon_color),
             None => Icon::new(filter.nav_icon())
-                .with_size(px(15.))
+                .with_size(px(16.))
                 .text_color(icon_color),
         })
         .child(
@@ -92,6 +101,14 @@ pub(crate) fn nav_item(
         .when(count >= 0, |el| {
             el.child(
                 div()
+                    .px_1p5()
+                    .py_0p5()
+                    .rounded_full()
+                    .bg(if active {
+                        theme.primary.opacity(0.18)
+                    } else {
+                        theme.muted.opacity(0.45)
+                    })
                     .text_xs()
                     .font_medium()
                     .text_color(count_color)

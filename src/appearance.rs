@@ -270,7 +270,7 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
 
     {
         let theme = Theme::global_mut(cx);
-        apply_cinematic_surfaces(theme);
+        apply_launcher_surfaces(theme);
         apply_accent(theme, &settings);
         apply_shape_and_density(theme, &settings);
         // On Windows, layered alpha handles translucency — keep surfaces solid.
@@ -288,18 +288,71 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
     }
 }
 
-/// Deep teal-black surfaces so the default dark theme is not generic gray / DL chrome.
-fn apply_cinematic_surfaces(theme: &mut Theme) {
-    if !theme.is_dark() {
+/// Game-launcher surfaces: ink-teal dark and ice-teal light — not DL slate.
+fn apply_launcher_surfaces(theme: &mut Theme) {
+    if theme.is_dark() {
+        theme.background = hsla(0.54, 0.38, 0.055, 1.0);
+        theme.title_bar = hsla(0.54, 0.32, 0.072, 1.0);
+        theme.title_bar_border = hsla(0.51, 0.42, 0.18, 1.0);
+        theme.sidebar = hsla(0.54, 0.34, 0.066, 1.0);
+        theme.sidebar_border = hsla(0.52, 0.28, 0.14, 1.0);
+        theme.muted = hsla(0.54, 0.20, 0.14, 1.0);
+        theme.muted_foreground = hsla(0.52, 0.14, 0.70, 1.0);
+        theme.secondary = hsla(0.54, 0.26, 0.12, 1.0);
+        theme.list = hsla(0.54, 0.28, 0.075, 1.0);
+        theme.list_even = hsla(0.54, 0.24, 0.082, 1.0);
+        theme.popover = hsla(0.54, 0.26, 0.10, 1.0);
+        theme.group_box = hsla(0.54, 0.24, 0.09, 1.0);
+        theme.border = hsla(0.52, 0.22, 0.20, 1.0);
+        theme.tab_bar = hsla(0.54, 0.30, 0.07, 1.0);
+        theme.tab = hsla(0.54, 0.26, 0.08, 1.0);
+        theme.table = hsla(0.54, 0.28, 0.075, 1.0);
+        theme.table_even = hsla(0.54, 0.24, 0.082, 1.0);
+        theme.input = hsla(0.52, 0.18, 0.16, 1.0);
+        theme.accordion = hsla(0.54, 0.26, 0.08, 1.0);
+        theme.tiles = hsla(0.54, 0.30, 0.06, 1.0);
+        theme.success = hsla(0.45, 0.55, 0.48, 1.0);
+        theme.info = hsla(0.51, 0.62, 0.52, 1.0);
         return;
     }
-    theme.background = hsla(0.53, 0.20, 0.055, 1.0);
-    theme.title_bar = hsla(0.53, 0.16, 0.072, 1.0);
-    theme.sidebar = hsla(0.53, 0.15, 0.068, 1.0);
-    theme.muted = hsla(0.53, 0.10, 0.12, 1.0);
-    theme.secondary = hsla(0.53, 0.12, 0.11, 1.0);
-    theme.list = hsla(0.53, 0.14, 0.07, 1.0);
-    theme.popover = hsla(0.53, 0.14, 0.09, 1.0);
+
+    theme.background = hsla(0.52, 0.18, 0.965, 1.0);
+    theme.title_bar = hsla(0.52, 0.16, 0.945, 1.0);
+    theme.title_bar_border = hsla(0.52, 0.22, 0.82, 1.0);
+    theme.sidebar = hsla(0.52, 0.20, 0.94, 1.0);
+    theme.sidebar_border = hsla(0.52, 0.14, 0.86, 1.0);
+    theme.muted = hsla(0.52, 0.12, 0.90, 1.0);
+    theme.muted_foreground = hsla(0.52, 0.16, 0.38, 1.0);
+    theme.secondary = hsla(0.52, 0.16, 0.91, 1.0);
+    theme.list = hsla(0.52, 0.14, 0.96, 1.0);
+    theme.list_even = hsla(0.52, 0.12, 0.94, 1.0);
+    theme.popover = hsla(0.52, 0.16, 0.97, 1.0);
+    theme.group_box = hsla(0.52, 0.14, 0.95, 1.0);
+    theme.border = hsla(0.52, 0.12, 0.82, 1.0);
+    theme.tab_bar = hsla(0.52, 0.14, 0.94, 1.0);
+    theme.tab = hsla(0.52, 0.12, 0.96, 1.0);
+    theme.table = hsla(0.52, 0.14, 0.96, 1.0);
+    theme.table_even = hsla(0.52, 0.12, 0.94, 1.0);
+    theme.input = hsla(0.52, 0.12, 0.88, 1.0);
+    theme.accordion = hsla(0.52, 0.12, 0.95, 1.0);
+    theme.tiles = hsla(0.52, 0.16, 0.96, 1.0);
+    theme.success = hsla(0.45, 0.50, 0.38, 1.0);
+    theme.info = hsla(0.51, 0.58, 0.40, 1.0);
+}
+
+/// Stable per-title hue for monogram tiles (game-card wallpaper).
+pub fn title_tint(name: &str, is_dark: bool) -> Hsla {
+    let mut hash: u32 = 2_166_136_261;
+    for b in name.as_bytes() {
+        hash ^= u32::from(*b);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    let hue = (hash % 360) as f32 / 360.0;
+    if is_dark {
+        hsla(hue, 0.46, 0.22, 1.0)
+    } else {
+        hsla(hue, 0.38, 0.82, 1.0)
+    }
 }
 
 /// Whether the noise overlay should paint at this intensity.
@@ -453,6 +506,23 @@ mod tests {
             "expected cinematic cyan/teal hue, got h={}",
             c.h
         );
+    }
+
+    #[test]
+    fn title_tint_is_stable_and_varies_by_name() {
+        let a = title_tint("Hades", true);
+        let b = title_tint("Hades", true);
+        let c = title_tint("Elden Ring", true);
+        assert!((a.h - b.h).abs() < f32::EPSILON);
+        assert!(
+            (a.h - c.h).abs() > 0.02,
+            "different titles should land on different hues: {} vs {}",
+            a.h,
+            c.h
+        );
+        assert!(a.s > 0.2 && a.l < 0.4);
+        let light = title_tint("Hades", false);
+        assert!(light.l > a.l);
     }
 
     #[test]

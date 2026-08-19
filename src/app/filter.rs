@@ -24,6 +24,7 @@ impl FilterKind {
     /// Asset path when the glyph is not a stock [`IconName`].
     pub fn nav_icon_path(self) -> Option<&'static str> {
         match self {
+            Self::Library => Some("icons/gamepad.svg"),
             Self::Compacted => Some("icons/file-archive.svg"),
             _ => None,
         }

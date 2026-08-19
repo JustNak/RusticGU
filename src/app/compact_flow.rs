@@ -368,7 +368,9 @@ impl LibraryApp {
                         theme.border.opacity(0.45)
                     })
                     .bg(if on {
-                        theme.secondary.opacity(0.62)
+                        theme
+                            .primary
+                            .opacity(if theme.is_dark() { 0.16 } else { 0.10 })
                     } else {
                         theme.secondary.opacity(0.28)
                     })
@@ -409,9 +411,9 @@ impl LibraryApp {
                                                 .px_1p5()
                                                 .py_0p5()
                                                 .rounded(px(4.))
-                                                .bg(theme.muted.opacity(0.7))
+                                                .bg(theme.primary.opacity(0.22))
                                                 .text_xs()
-                                                .text_color(theme.muted_foreground)
+                                                .text_color(theme.primary)
                                                 .child("Recommended"),
                                         )
                                     }),

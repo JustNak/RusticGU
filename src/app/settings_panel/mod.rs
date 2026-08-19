@@ -47,9 +47,12 @@ impl LibraryApp {
                                     .gap_2()
                                     .items_center()
                                     .child(
+                                        div().w(px(8.)).h(px(8.)).rounded_full().bg(theme.primary),
+                                    )
+                                    .child(
                                         Icon::new(category.icon())
                                             .with_size(px(16.))
-                                            .text_color(theme.muted_foreground),
+                                            .text_color(theme.primary),
                                     )
                                     .child(
                                         div()

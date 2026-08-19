@@ -1,14 +1,14 @@
 //! About dialog extracted from `LibraryApp`.
 
-use gpui::{div, px, Context, ParentElement, Styled, Window};
+use gpui::{div, img, px, Context, ObjectFit, ParentElement, Styled, StyledImage, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     description_list::DescriptionList,
-    h_flex, v_flex, ActiveTheme, Disableable, Sizable, WindowExt,
+    h_flex, v_flex, ActiveTheme, Disableable, Sizable, StyledExt, WindowExt,
 };
 
 use super::LibraryApp;
-use crate::branding::{APP_NAME, APP_VERSION};
+use crate::branding::{APP_LOGO_DARK, APP_LOGO_LIGHT, APP_NAME, APP_VERSION};
 use crate::updater::open_release_page;
 
 impl LibraryApp {
@@ -40,7 +40,33 @@ impl LibraryApp {
                 .child(
                     v_flex()
                         .gap_3()
-                        .child(div().text_sm().child(crate::branding::APP_TAGLINE))
+                        .child(
+                            h_flex()
+                                .items_center()
+                                .gap_3()
+                                .child(
+                                    img(if theme.is_dark() {
+                                        APP_LOGO_DARK
+                                    } else {
+                                        APP_LOGO_LIGHT
+                                    })
+                                    .w(px(48.))
+                                    .h(px(48.))
+                                    .rounded(px(10.))
+                                    .object_fit(ObjectFit::Cover),
+                                )
+                                .child(
+                                    v_flex()
+                                        .gap_0p5()
+                                        .child(div().text_lg().font_semibold().child(APP_NAME))
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(muted)
+                                                .child(crate::branding::APP_TAGLINE),
+                                        ),
+                                ),
+                        )
                         .child(
                             DescriptionList::new()
                                 .columns(1)

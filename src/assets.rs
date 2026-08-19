@@ -122,6 +122,7 @@ mod tests {
         // These are the icons the empty-state / sidebar render on first launch.
         for path in [
             "icons/inbox.svg",
+            "icons/gamepad.svg",
             "icons/arrow-down.svg",
             "icons/arrow-up.svg",
             "icons/circle-check.svg",
@@ -161,6 +162,31 @@ mod tests {
             // PNG magic
             assert_eq!(&bytes[..4], b"\x89PNG", "{path} should be a PNG");
         }
+    }
+
+    #[test]
+    fn brand_logo_keeps_color() {
+        let bytes = Assets::load_embedded("brand/logo.png").expect("dark logo");
+        let img = image::load_from_memory(&bytes)
+            .expect("logo decodes")
+            .to_rgba8();
+        let colorful = img
+            .pixels()
+            .filter(|px| {
+                let [r, g, b, a] = px.0;
+                if a < 200 {
+                    return false;
+                }
+                let max = r.max(g).max(b) as i16;
+                let min = r.min(g).min(b) as i16;
+                max - min > 40
+            })
+            .count();
+        let n = img.width() as usize * img.height() as usize;
+        assert!(
+            colorful * 8 > n,
+            "logo should be a color mark, not 2-tone slate (colorful={colorful} n={n})"
+        );
     }
 
     #[test]

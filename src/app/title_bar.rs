@@ -135,9 +135,10 @@ impl LibraryApp {
                                         .items_center()
                                         .child(
                                             img(logo)
-                                                .w(px(22.))
-                                                .h(px(22.))
-                                                .object_fit(ObjectFit::Contain),
+                                                .w(px(26.))
+                                                .h(px(26.))
+                                                .rounded(px(6.))
+                                                .object_fit(ObjectFit::Cover),
                                         )
                                         .child(
                                             div()

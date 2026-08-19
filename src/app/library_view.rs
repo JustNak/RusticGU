@@ -1,8 +1,9 @@
 //! Cover-art gallery + overlay compact actions.
 
 use gpui::{
-    div, img, prelude::FluentBuilder, px, ClickEvent, Context, InteractiveElement, IntoElement,
-    ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled, StyledImage,
+    div, hsla, img, prelude::FluentBuilder, px, ClickEvent, Context, Hsla, InteractiveElement,
+    IntoElement, ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled,
+    StyledImage,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -10,18 +11,21 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex, ActiveTheme, Disableable, Icon, Sizable, StyledExt,
 };
+use stores::StoreId;
 
 use super::widgets::styled_progress;
 use super::FilterKind;
 use super::LibraryApp;
+use crate::appearance::title_tint;
+use crate::branding::{APP_LOGO_DARK, APP_LOGO_LIGHT};
 use crate::covers::Monogram;
-use crate::format::format_size_pair;
-use crate::library::{title_is_compact_excluded, LibraryTitle};
+use crate::format::{format_bytes, format_size_pair};
+use crate::library::{title_is_compact_excluded, LibraryStore, LibraryTitle};
 use crate::settings::UiDensity;
 
-const POSTER_RADIUS: f32 = 10.0;
-const POSTER_GAP: f32 = 8.0;
-const UNSELECTED_DIM: f32 = 0.6;
+const POSTER_RADIUS: f32 = 12.0;
+const POSTER_GAP: f32 = 10.0;
+const UNSELECTED_DIM: f32 = 0.84;
 
 impl LibraryApp {
     pub(crate) fn render_library(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -52,15 +56,21 @@ impl LibraryApp {
                     .justify_between()
                     .gap_3()
                     .child(
-                        div()
-                            .text_lg()
-                            .font_bold()
-                            .text_color(theme.foreground)
-                            .child(match filter {
-                                FilterKind::Compacted => "Compacted",
-                                FilterKind::Uncompacted => "Uncompacted",
-                                _ => "Library",
-                            }),
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(div().w(px(8.)).h(px(8.)).rounded_full().bg(theme.primary))
+                            .child(
+                                div()
+                                    .text_lg()
+                                    .font_bold()
+                                    .text_color(theme.foreground)
+                                    .child(match filter {
+                                        FilterKind::Compacted => "Compacted",
+                                        FilterKind::Uncompacted => "Uncompacted",
+                                        _ => "Library",
+                                    }),
+                            ),
                     )
                     .child(
                         h_flex()
@@ -173,24 +183,49 @@ impl LibraryApp {
         let theme = cx.theme().clone();
         let query = self.search_input.read(cx).value();
         let filtered = !query.trim().is_empty() || self.filter != FilterKind::Library;
+        let logo = if theme.is_dark() {
+            APP_LOGO_DARK
+        } else {
+            APP_LOGO_LIGHT
+        };
         v_flex()
             .size_full()
             .items_center()
             .justify_center()
             .gap_3()
             .child(
+                img(logo)
+                    .w(px(72.))
+                    .h(px(72.))
+                    .rounded(px(16.))
+                    .object_fit(ObjectFit::Cover),
+            )
+            .child(
                 div()
+                    .text_lg()
+                    .font_bold()
+                    .text_color(theme.foreground)
+                    .child(if filtered {
+                        "Nothing matches"
+                    } else {
+                        "Your library is empty"
+                    }),
+            )
+            .child(
+                div()
+                    .max_w(px(360.))
                     .text_sm()
+                    .text_center()
                     .text_color(theme.muted_foreground)
                     .child(if filtered {
-                        "No titles match this filter."
+                        "Try another filter or clear the search."
                     } else {
-                        "No games found."
+                        "Scan Steam and other launchers to start compacting games."
                     }),
             )
             .child(
                 Button::new("library-empty-refresh")
-                    .outline()
+                    .primary()
                     .label("Refresh")
                     .icon(Icon::empty().path("icons/rotate-cw.svg"))
                     .on_click(cx.listener(|this, _, _, cx| this.refresh_library(cx))),
@@ -234,6 +269,7 @@ fn render_poster_card(
     let has_art = cover.is_some();
     let monogram = Monogram::from_title(&game);
     let badge = game.store.badge();
+    let badge_color = store_badge_color(game.store);
     let excluded = title_is_compact_excluded(&game);
     let compacted = game.is_compacted();
     let hover_spec = poster_hover_spec(compacted, excluded);
@@ -242,11 +278,15 @@ fn render_poster_card(
     let selected = chrome.selected;
     let busy = chrome.busy;
     let group = card_dom_id(&id);
+    let name = game.name.clone();
+    let caption = caption_size(&game);
+    let tint = title_tint(&name, theme.is_dark());
 
     v_flex()
         .id(group.clone())
         .group(group.clone())
         .w(px(poster_w))
+        .gap_1p5()
         .opacity(if selected { 1.0 } else { UNSELECTED_DIM })
         .when(!selected, |el| el.hover(|s| s.opacity(1.0)))
         .child(
@@ -257,13 +297,14 @@ fn render_poster_card(
                 .h(px(poster_h))
                 .rounded(px(POSTER_RADIUS))
                 .overflow_hidden()
-                .border_1()
+                .border_2()
                 .border_color(if selected {
                     theme.primary
                 } else {
-                    theme.border.opacity(0.28)
+                    theme.border.opacity(0.22)
                 })
-                .bg(theme.secondary)
+                .hover(|s| s.border_color(theme.primary.opacity(0.55)))
+                .bg(if has_art { theme.secondary } else { tint })
                 .cursor_pointer()
                 .tooltip({
                     let tip = SharedString::from(tip);
@@ -279,7 +320,7 @@ fn render_poster_card(
                 .child(if has_art {
                     div().size_full().into_any_element()
                 } else {
-                    render_monogram_tile(&monogram, badge, theme.muted_foreground, theme.foreground)
+                    render_monogram_tile(&monogram, badge, badge_color, theme.foreground)
                         .into_any_element()
                 })
                 .when_some(cover, |el, image| {
@@ -291,18 +332,115 @@ fn render_poster_card(
                             .object_fit(ObjectFit::Cover),
                     )
                 })
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(8.))
+                        .right(px(8.))
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded(px(4.))
+                        .bg(hsla(0.0, 0.0, 0.04, 0.62))
+                        .text_xs()
+                        .font_semibold()
+                        .text_color(badge_color)
+                        .child(badge),
+                )
                 .child(render_poster_veil(&id, group, hover_spec, busy, cx))
                 .when(poster_shows_compacted_badge(compacted, excluded), |el| {
-                    el.child(render_compacted_badge(&id, theme.foreground))
+                    el.child(render_compacted_badge(&id, &theme))
                 }),
+        )
+        .child(
+            v_flex()
+                .id(SharedString::from(format!("poster-caption-{id}")))
+                .w_full()
+                .gap_0p5()
+                .px_0p5()
+                .cursor_pointer()
+                .on_click({
+                    let id = id.clone();
+                    cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                        let multi = ev.modifiers().secondary();
+                        this.select_game_click(id.clone(), multi, cx);
+                    })
+                })
+                .child(
+                    div()
+                        .w_full()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(theme.foreground)
+                        .truncate()
+                        .child(name),
+                )
+                .when(!caption.is_empty(), |el| {
+                    el.child(
+                        div()
+                            .text_xs()
+                            .text_color(theme.muted_foreground)
+                            .truncate()
+                            .child(caption),
+                    )
+                }),
+        )
+}
+
+fn store_badge_color(store: LibraryStore) -> Hsla {
+    match store {
+        LibraryStore::Steam => hsla(0.55, 0.78, 0.64, 1.0),
+        LibraryStore::Extra(StoreId::Epic) => hsla(0.60, 0.85, 0.55, 1.0),
+        LibraryStore::Extra(StoreId::Gog) => hsla(0.90, 0.62, 0.55, 1.0),
+        LibraryStore::Extra(StoreId::Ea) => hsla(0.00, 0.78, 0.58, 1.0),
+        LibraryStore::Extra(StoreId::Ubisoft) => hsla(0.58, 0.90, 0.52, 1.0),
+        LibraryStore::Extra(StoreId::Riot) => hsla(0.99, 0.72, 0.52, 1.0),
+        LibraryStore::Extra(StoreId::Battlenet) => hsla(0.55, 0.95, 0.53, 1.0),
+        LibraryStore::Extra(StoreId::Itch) => hsla(0.00, 0.85, 0.62, 1.0),
+        LibraryStore::Extra(StoreId::XboxGames) => hsla(0.33, 0.72, 0.42, 1.0),
+    }
+}
+
+fn caption_size(game: &LibraryTitle) -> String {
+    match (game.on_disk_bytes, game.logical_bytes) {
+        (Some(disk), Some(logical)) if disk + logical / 20 < logical => format_bytes(disk),
+        (Some(disk), _) => format_bytes(disk),
+        (None, Some(logical)) => format_bytes(logical),
+        _ => String::new(),
+    }
+}
+
+fn render_compacted_badge(id: &str, theme: &gpui_component::Theme) -> impl IntoElement {
+    h_flex()
+        .id(SharedString::from(format!("poster-compacted-{id}")))
+        .absolute()
+        .top(px(8.))
+        .left(px(8.))
+        .items_center()
+        .gap_1()
+        .px_1p5()
+        .py_0p5()
+        .rounded(px(6.))
+        .bg(theme.primary.opacity(0.90))
+        .child(
+            Icon::empty()
+                .path("icons/file-archive.svg")
+                .with_size(px(11.))
+                .text_color(theme.primary_foreground),
+        )
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(theme.primary_foreground)
+                .child("Compacted"),
         )
 }
 
 fn render_monogram_tile(
     monogram: &Monogram,
     badge: &'static str,
-    muted: gpui::Hsla,
-    fg: gpui::Hsla,
+    badge_color: Hsla,
+    fg: Hsla,
 ) -> impl IntoElement {
     v_flex()
         .id(SharedString::from(format!("monogram-{}", monogram.title)))
@@ -315,7 +453,7 @@ fn render_monogram_tile(
             div()
                 .text_3xl()
                 .font_bold()
-                .text_color(muted)
+                .text_color(fg)
                 .child(monogram.initials.clone()),
         )
         .child(
@@ -323,6 +461,7 @@ fn render_monogram_tile(
                 .text_xs()
                 .font_semibold()
                 .text_color(fg)
+                .opacity(0.92)
                 .child(monogram.title.clone()),
         )
         .child(
@@ -330,8 +469,9 @@ fn render_monogram_tile(
                 .px_1p5()
                 .py_0p5()
                 .rounded(px(4.))
+                .bg(hsla(0.0, 0.0, 0.0, 0.28))
                 .text_xs()
-                .text_color(muted)
+                .text_color(badge_color)
                 .child(badge),
         )
 }
@@ -381,27 +521,6 @@ fn header_compact_label(selected_n: usize) -> Option<String> {
     (selected_n > 1).then(|| format!("Compress {selected_n}"))
 }
 
-fn render_compacted_badge(id: &str, fg: gpui::Hsla) -> impl IntoElement {
-    h_flex()
-        .id(SharedString::from(format!("poster-compacted-{id}")))
-        .absolute()
-        .top(px(8.))
-        .left(px(8.))
-        .items_center()
-        .gap_1()
-        .px_1p5()
-        .py_0p5()
-        .rounded(px(6.))
-        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.62))
-        .child(
-            Icon::empty()
-                .path("icons/file-archive.svg")
-                .with_size(px(11.))
-                .text_color(fg),
-        )
-        .child(div().text_xs().text_color(fg).child("Compacted"))
-}
-
 fn render_poster_veil(
     id: &str,
     group: SharedString,
@@ -420,7 +539,7 @@ fn render_poster_veil(
         .justify_end()
         .p_2()
         .gap_1p5()
-        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.52))
+        .bg(hsla(0.54, 0.30, 0.04, 0.52))
         .invisible()
         .group_hover(group, |s| s.visible())
         .when(spec.show_excluded_hint, |el| {
@@ -515,9 +634,11 @@ fn render_poster_veil(
 mod tests {
     use super::{
         header_compact_label, poster_hover_spec, poster_shows_compacted_badge, poster_size,
-        POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
+        store_badge_color, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
     };
+    use crate::library::LibraryStore;
     use crate::settings::UiDensity;
+    use stores::StoreId;
 
     #[test]
     fn posters_are_portrait_2_by_3_in_spec() {
@@ -527,8 +648,18 @@ mod tests {
             assert!((w * 3.0 - h * 2.0).abs() < 0.01, "2:3 {w}x{h}");
         }
         assert!((8.0..=12.0).contains(&POSTER_RADIUS));
-        assert!((6.0..=10.0).contains(&POSTER_GAP));
-        assert!((UNSELECTED_DIM - 0.6).abs() < 0.001);
+        assert!((6.0..=12.0).contains(&POSTER_GAP));
+        assert!((UNSELECTED_DIM - 0.84).abs() < 0.001);
+    }
+
+    #[test]
+    fn store_badges_use_distinct_hues() {
+        let steam = store_badge_color(LibraryStore::Steam);
+        let xbox = store_badge_color(LibraryStore::Extra(StoreId::XboxGames));
+        let itch = store_badge_color(LibraryStore::Extra(StoreId::Itch));
+        assert!((steam.h - xbox.h).abs() > 0.1);
+        assert!((steam.h - itch.h).abs() > 0.1);
+        assert!(steam.s > 0.4 && xbox.s > 0.4);
     }
 
     #[test]
