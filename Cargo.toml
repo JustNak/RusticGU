@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "rusticgu"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "RusticGU — a game library compact launcher"
 license = "MIT"
