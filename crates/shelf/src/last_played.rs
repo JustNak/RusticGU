@@ -17,6 +17,7 @@
 //! **cold / LZX-eligible**, never a fabricated timestamp.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 /// Stores that may legally produce a last-played timestamp.
@@ -43,9 +44,9 @@ pub fn last_played_from_acf(_acf_text: &str) -> Option<SystemTime> {
     None
 }
 
-/// `apps/{appid}/LastPlayed` from `localconfig.vdf` only.
+/// `apps/{appid}/LastPlayed` from `localconfig.vdf` text only.
 /// Other keys in the same file (including anything named `LastUpdated`) are ignored.
-pub fn last_played_from_steam_localconfig(vdf_text: &str, app_id: u32) -> Option<SystemTime> {
+pub fn last_played_unix_from_steam_localconfig(vdf_text: &str, app_id: u32) -> Option<u64> {
     let root = parse_vdf(vdf_text)?;
     let apps = find_apps(&root)?;
     let id = app_id.to_string();
@@ -59,7 +60,87 @@ pub fn last_played_from_steam_localconfig(vdf_text: &str, app_id: u32) -> Option
         .iter()
         .find(|(k, _)| k.eq_ignore_ascii_case("LastPlayed"))
         .map(|(_, v)| v.as_str())?;
-    unix_to_system(raw.parse().ok()?)
+    raw.parse().ok()
+}
+
+/// `apps/{appid}/LastPlayed` from `localconfig.vdf` only.
+pub fn last_played_from_steam_localconfig(vdf_text: &str, app_id: u32) -> Option<SystemTime> {
+    last_played_unix_from_steam_localconfig(vdf_text, app_id).and_then(unix_to_system)
+}
+
+/// Locate Steam `userdata\{id}\config\localconfig.vdf` and read
+/// `apps/{appid}/LastPlayed` only.
+///
+/// `steam_userdata_root` may be:
+/// - `…\steam\userdata` (scan each `{id}` child)
+/// - a single `userdata\{id}` directory
+/// - `…\steam` (then `userdata\` is resolved one level down)
+///
+/// **Multiple user ids:** returns the **most recent** `LastPlayed` across
+/// every `localconfig.vdf` found. Never uses ACF `LastUpdated`.
+pub fn last_played_unix_from_steam_userdata(
+    steam_userdata_root: impl AsRef<Path>,
+    app_id: u32,
+) -> Option<u64> {
+    let mut best: Option<u64> = None;
+    for vdf_path in steam_localconfig_vdf_paths(steam_userdata_root.as_ref()) {
+        let Ok(text) = std::fs::read_to_string(&vdf_path) else {
+            continue;
+        };
+        if let Some(secs) = last_played_unix_from_steam_localconfig(&text, app_id) {
+            best = Some(best.map_or(secs, |b| b.max(secs)));
+        }
+    }
+    best
+}
+
+/// [`last_played_unix_from_steam_userdata`] as [`SystemTime`].
+pub fn last_played_from_steam_userdata(
+    steam_userdata_root: impl AsRef<Path>,
+    app_id: u32,
+) -> Option<SystemTime> {
+    last_played_unix_from_steam_userdata(steam_userdata_root, app_id).and_then(unix_to_system)
+}
+
+/// Known relative path: `userdata\{id}\config\localconfig.vdf`.
+fn steam_localconfig_vdf_paths(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let collect_user = |dir: &Path, out: &mut Vec<PathBuf>| {
+        let vdf = dir.join("config").join("localconfig.vdf");
+        if vdf.is_file() {
+            out.push(vdf);
+        }
+    };
+
+    // Single `userdata\{id}` (has config/localconfig.vdf directly).
+    collect_user(root, &mut out);
+    if !out.is_empty() {
+        return out;
+    }
+
+    let scan_userdata = |userdata: &Path, out: &mut Vec<PathBuf>| {
+        let Ok(rd) = std::fs::read_dir(userdata) else {
+            return;
+        };
+        for ent in rd.flatten() {
+            if ent.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                collect_user(&ent.path(), out);
+            }
+        }
+    };
+
+    // `…\steam\userdata`
+    scan_userdata(root, &mut out);
+    if !out.is_empty() {
+        return out;
+    }
+
+    // `…\steam` → userdata\
+    let nested = root.join("userdata");
+    if nested.is_dir() {
+        scan_userdata(&nested, &mut out);
+    }
+    out
 }
 
 /// `CaveStats.localLastRunAt` only (unix seconds or RFC3339 `…Z`).

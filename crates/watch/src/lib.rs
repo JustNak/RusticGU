@@ -34,7 +34,8 @@ pub use flags::{
 pub use dstorage::{detect_direct_storage, DirectStorageHint, DSTORAGE_CORE_DLL, DSTORAGE_DLL};
 pub use machine::{FsWatchGate, LiveWatch, TickEvent};
 pub use skip::{
-    extension_is_skipped, folder_is_skipped, is_compact_candidate, is_steam_shadercache_path,
-    ELIGIBLE_EXTENSIONS, SKIP_EXTENSIONS, SKIP_FOLDER_SEGMENTS,
+    extension_is_skipped, folder_is_skipped, is_compact_candidate, is_save_folder_path,
+    is_steam_shadercache_path, ELIGIBLE_EXTENSIONS, SKIP_EXTENSIONS, SKIP_FOLDER_SEGMENTS,
+    SKIP_SAVE_FOLDER_SEGMENTS,
 };
 pub use status::{title_from_acf, title_from_acf_text, MemorySteam, SteamStatus, TitleStatus};

@@ -1,12 +1,16 @@
 //! Compact-candidate skip lists (extensions + folders).
 //!
 //! These are **data**, not scattered one-off string matches. Incremental
-//! recompact uses [`is_compact_candidate`] so already-compressed media/archives
-//! and GPU shader caches are never submitted to WOF.
+//! recompact uses [`is_compact_candidate`] so already-compressed media/archives,
+//! GPU shader caches, and **in-tree save folders** are never submitted to WOF.
 //!
 //! Do **not** hard-skip: `wav`, `dds`, `bnk`.
 //! Do **not** skip container/game-data formats: `vpk`, `vpak`, `pak`, `cpk`,
-//! `arc`, `dat`, `bin`, `uasset`, `uexp`, `ubulk`.
+//! `arc`, `dat`, `bin`, `uasset`, `uexp`, `ubulk` — unless the path sits under
+//! a save folder ([`SKIP_SAVE_FOLDER_SEGMENTS`]).
+//!
+//! Do **not** skip every Unreal `Saved` tree; only `Saved\SaveGames` /
+//! `Saved\Save` (plus explicit save segment names).
 
 use std::path::Path;
 
@@ -41,6 +45,25 @@ pub const SKIP_FOLDER_SEGMENTS: &[&str] = &[
     "DXCache",
     "VkCache",
     "GLCache",
+];
+
+/// In-tree save directory segments (case-insensitive).
+///
+/// `dat` / `bin` stay extension-eligible **unless** a path contains one of
+/// these. `Saved` alone is **not** listed — Unreal `Saved\Config` / `Logs` /
+/// `Paks` must remain compact-eligible. `Saved\SaveGames` and `Saved\Save`
+/// are matched as a two-segment pair in [`folder_is_skipped`].
+pub const SKIP_SAVE_FOLDER_SEGMENTS: &[&str] = &[
+    "SaveGames",
+    "saves",
+    "Saved Games",
+    "Save",
+    "save",
+    "SaveGame",
+    "savegame",
+    "SaveData",
+    "savedata",
+    "UserSaves",
 ];
 
 fn path_segments(path: &Path) -> Vec<String> {
@@ -84,10 +107,28 @@ pub fn is_steam_shadercache_path(path: &Path) -> bool {
         .any(|w| w[0] == "steamapps" && w[1] == "shadercache")
 }
 
-/// True when any path segment is a GPU/pipeline cache folder, including
-/// `Saved\PipelineCaches`.
+/// True when the path sits under a save directory (`SaveGames`, `saves`,
+/// `Saved Games`, `Save` / `SaveGame` / `SaveData` / `UserSaves`, or Unreal
+/// `Saved\SaveGames` / `Saved\Save`).
+pub fn is_save_folder_path(path: &Path) -> bool {
+    let segs = path_segments(path);
+    if segs.windows(2).any(|w| {
+        w[0].eq_ignore_ascii_case("Saved")
+            && (w[1].eq_ignore_ascii_case("SaveGames") || w[1].eq_ignore_ascii_case("Save"))
+    }) {
+        return true;
+    }
+    segs.iter().any(|seg| {
+        SKIP_SAVE_FOLDER_SEGMENTS
+            .iter()
+            .any(|skip| seg.eq_ignore_ascii_case(skip))
+    })
+}
+
+/// True when any path segment is a GPU/pipeline cache folder, a save
+/// folder, `Saved\PipelineCaches`, or Steam `steamapps\shadercache`.
 pub fn folder_is_skipped(path: &Path) -> bool {
-    if is_steam_shadercache_path(path) {
+    if is_steam_shadercache_path(path) || is_save_folder_path(path) {
         return true;
     }
     let segs = path_segments(path);
@@ -172,5 +213,23 @@ mod tests {
         assert!(!folder_is_skipped(Path::new(
             r"E:\SteamLibrary\steamapps\common\Dota 2\game\dota\pak01.vpk"
         )));
+    }
+
+    #[test]
+    fn save_folders_skipped_but_not_whole_saved_tree() {
+        assert!(is_save_folder_path(Path::new(r"game\SaveGames\foo.dat")));
+        assert!(is_save_folder_path(Path::new(r"game\saves\slot.bin")));
+        assert!(is_save_folder_path(Path::new(
+            r"My Game\Saved Games\profile.sav"
+        )));
+        assert!(is_save_folder_path(Path::new(
+            r"game\Saved\SaveGames\slot.sav"
+        )));
+        assert!(!is_save_folder_path(Path::new(r"game\Saved\Config\Game.ini")));
+        assert!(!is_save_folder_path(Path::new(r"game\data\foo.dat")));
+        assert!(is_compact_candidate(Path::new(r"game\data\foo.dat")));
+        assert!(is_compact_candidate(Path::new(r"game\Saved\Paks\pak.bin")));
+        assert!(!is_compact_candidate(Path::new(r"game\SaveGames\foo.dat")));
+        assert!(!is_compact_candidate(Path::new(r"game\saves\slot.bin")));
     }
 }
