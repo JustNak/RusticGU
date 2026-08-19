@@ -367,7 +367,8 @@ impl LibraryApp {
             self.show_toast("Select a game first.", cx);
             return;
         };
-        match estimate_compact(&game.install_path, self.settings.compact_algorithm) {
+        let algorithm = self.settings.compact_algorithm.for_live_library();
+        match estimate_compact(&game.install_path, algorithm) {
             Ok(estimate) => {
                 self.open_estimate_dialog(window, cx, estimate, game.name);
             }
@@ -391,9 +392,10 @@ impl LibraryApp {
         };
         match preflight(&game.install_path, self.settings.allow_dstorage_override) {
             Err(CompactRefuse::DirectStorage { .. }) => {
-                if let Ok(estimate) =
-                    estimate_compact(&game.install_path, self.settings.compact_algorithm)
-                {
+                if let Ok(estimate) = estimate_compact(
+                    &game.install_path,
+                    self.settings.compact_algorithm.for_live_library(),
+                ) {
                     self.open_dstorage_warning(window, cx, estimate);
                 } else {
                     self.show_error_toast(
@@ -410,7 +412,8 @@ impl LibraryApp {
             Ok(()) => {}
         }
 
-        match estimate_compact(&game.install_path, self.settings.compact_algorithm) {
+        let algorithm = self.settings.compact_algorithm.for_live_library();
+        match estimate_compact(&game.install_path, algorithm) {
             Ok(estimate) => {
                 let verb = match op {
                     CompactOp::Compress => "Compact",
@@ -438,7 +441,6 @@ impl LibraryApp {
         });
         cx.notify();
 
-        let algorithm = self.settings.compact_algorithm;
         let allow = self.settings.allow_dstorage_override;
         let path = game.install_path.clone();
         let name = game.name.clone();

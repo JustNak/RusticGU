@@ -133,4 +133,21 @@ mod tests {
             assert!(!is_lznt1_command(&inv), "{algo:?}");
         }
     }
+
+    #[test]
+    fn live_library_command_never_selects_lzx() {
+        for algo in CompactAlgorithm::LIVE {
+            let inv = build_compact_command(CompactOp::Compress, Path::new("."), algo);
+            let line = inv.display_cmdline().to_ascii_uppercase();
+            assert!(!line.contains("LZX"), "{line}");
+            assert!(is_wof_exe_command(&inv));
+        }
+        let coerced = CompactAlgorithm::Lzx.for_live_library();
+        let inv = build_compact_command(CompactOp::Compress, Path::new("."), coerced);
+        assert!(inv
+            .display_cmdline()
+            .to_ascii_uppercase()
+            .contains("/EXE:XPRESS8K"));
+        assert!(!inv.display_cmdline().to_ascii_uppercase().contains("LZX"));
+    }
 }

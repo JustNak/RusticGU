@@ -1,27 +1,37 @@
 # RusticGU
 
-Game library compact launcher for Windows. Scan your Steam library, estimate WOF savings, and compact or undo selected installs with `compact /EXE` (default **XPRESS8K**). Never NTFS LZNT1.
+RusticGU is a Windows game-library compact tool. It uses transparent WOF `compact /EXE` so titles stay playable — not NTFS LZNT1, not a rewriter, not WindowsApps, and with **no savings-percentage promise**.
 
-Built with [gpui](https://www.gpui.rs/) `0.2.2` and [gpui-component](https://github.com/longbridge/gpui-component) `0.5.1`.
+Built in Rust with [gpui](https://www.gpui.rs/) `0.2.2` and [gpui-component](https://github.com/longbridge/gpui-component) `0.5.1`. Dark default, launcher-style game cards, tray flyout.
 
-## Features
+**Live Compact** (recompact after patches, XPRESS8K) and **Shelf** (the only LZX path, for cold games) are later work. This build does not implement them.
 
-- Steam library scan: `HKCU\Software\Valve\Steam\SteamPath` → both `libraryfolders.vdf` files → `appmanifest_*.acf` → `steamapps\common\{installdir}`
-- Game cards with logical vs on-disk size when cheap to read
-- WOF CompactOS only (`compact /C /EXE:XPRESS8K` / `compact /U /EXE`)
-- Skip video, audio, archives, logs/dumps, shader cache, and SaveGames
-- Refuse ReFS, `WindowsApps` paths, and a running exe in-tree
-- Warn (and block) when `dstorage.dll` is present unless Settings → General override is On
-- Dry-run estimate before apply; progress + toast on done/fail
-- Settings: General / System / Appearance (live draft, Save commits)
-- Update channel picker: Stable (`/releases/latest`) or Nightly (published `vX.Y.Z-nightly.*`)
-- Minimize-to-tray via `SW_HIDE` plus a tray flyout (summary, pause Live Compact stub, recompact, open window)
+## What this build does
+
+- Scan **Steam** via launcher indexes: `HKCU\Software\Valve\Steam\SteamPath` → both `libraryfolders.vdf` files → `appmanifest_*.acf` → `steamapps\common\{installdir}`
+- Show those games as cards with logical vs on-disk size when cheap to read
+- Compact / uncompact a selected folder with WOF only (`compact /C /EXE:<algo>` / `compact /U /EXE`)
+- Default algorithm: **XPRESS8K**. XPRESS4K / XPRESS16K are selectable. **LZX is not** — reserved for Shelf
+- Skip saves, caches, and already-compressed media (video / audio / archives, logs / dumps, shader cache, SaveGames)
+- If `dstorage.dll` is in the tree: warn and skip (do not compact) unless Settings → General override is On
+- Refuse ReFS, a running exe in-tree, and WindowsApps paths
+- Dry-run estimate before apply; progress + toast on done / fail
+- Settings: General / System / Appearance (live draft; Save commits)
+- GitHub updater: Stable (`/releases/latest`) or Nightly (`vX.Y.Z-nightly.*`), chosen in Settings → General
+- Minimize-to-tray via `SW_HIDE`, plus a tray flyout
+
+## What this build does not do
+
+- Extra-store discovery (Epic / GOG / EA / Ubisoft / Riot / Battle.net / itch)
+- File-system watch / patch detection (`src/watch`)
+- Live Compact (tray Pause/Resume and “Recompact last patch” are stubs)
+- Shelf (no LZX path in the live library)
 
 ## Requirements
 
 - Windows 10 version 1607 or later
 - NTFS volume
-- Steam installed (for library discovery)
+- Steam installed (this build’s only launcher index)
 
 ## Build
 
@@ -29,13 +39,15 @@ Built with [gpui](https://www.gpui.rs/) `0.2.2` and [gpui-component](https://git
 cargo build --release -p rusticgu -p rusticgu-updater
 ```
 
-Package an NSIS installer:
+Package an NSIS installer (`RusticGU-windows-x64-setup.exe`):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/package-windows.ps1
 ```
 
-## Data
+Binaries: `rusticgu.exe`, `rusticgu-updater.exe`. App id `com.rusticgu.app`.
+
+## Settings and data
 
 `%APPDATA%\RusticGU\settings.json` and `state.json` (camelCase keys).
 

@@ -304,6 +304,13 @@ impl CompactAlgorithm {
         CompactAlgorithm::Lzx,
     ];
 
+    /// Algorithms the live library may use. LZX is Shelf-only (later).
+    pub const LIVE: [CompactAlgorithm; 3] = [
+        CompactAlgorithm::Xpress4k,
+        CompactAlgorithm::Xpress8k,
+        CompactAlgorithm::Xpress16k,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Xpress4k => "XPRESS4K",
@@ -316,6 +323,19 @@ impl CompactAlgorithm {
     /// Value passed to `compact /EXE:<name>`.
     pub fn exe_flag(self) -> &'static str {
         self.label()
+    }
+
+    pub fn is_live(self) -> bool {
+        !matches!(self, Self::Lzx)
+    }
+
+    /// Coerce Shelf-only LZX back to the live default.
+    pub fn for_live_library(self) -> Self {
+        if self.is_live() {
+            self
+        } else {
+            Self::Xpress8k
+        }
     }
 }
 
@@ -411,6 +431,7 @@ impl Settings {
         self.accent_saturation = self.accent_saturation.clamp(0.0, 100.0);
         self.accent_lightness = self.accent_lightness.clamp(0.0, 100.0);
         self.window_layout.sanitize();
+        self.compact_algorithm = self.compact_algorithm.for_live_library();
     }
 
     pub fn reset_appearance(&mut self) {
@@ -464,8 +485,25 @@ mod tests {
         assert_eq!(s.accent_preset, AccentPreset::Orange);
         assert_eq!(s.compact_algorithm, CompactAlgorithm::Xpress8k);
         assert_eq!(s.compact_algorithm.exe_flag(), "XPRESS8K");
+        assert!(CompactAlgorithm::LIVE
+            .iter()
+            .all(|algo| algo.is_live() && *algo != CompactAlgorithm::Lzx));
+        assert!(!CompactAlgorithm::Lzx.is_live());
+        assert_eq!(
+            CompactAlgorithm::Lzx.for_live_library(),
+            CompactAlgorithm::Xpress8k
+        );
         assert_eq!(s.window_layout.width, DEFAULT_WINDOW_WIDTH);
         assert_eq!(s.window_layout.height, DEFAULT_WINDOW_HEIGHT);
+    }
+
+    #[test]
+    fn lzx_is_not_kept_for_live_library() {
+        let mut s = Settings::default();
+        s.compact_algorithm = CompactAlgorithm::Lzx;
+        s.sanitize_appearance();
+        assert_eq!(s.compact_algorithm, CompactAlgorithm::Xpress8k);
+        assert!(!CompactAlgorithm::LIVE.contains(&CompactAlgorithm::Lzx));
     }
 
     #[test]

@@ -12,7 +12,6 @@ use gpui_component::{
 
 use super::LibraryApp;
 use crate::branding::APP_NAME;
-use crate::compact::CompactOp;
 use crate::format::{format_bytes, format_size_pair};
 
 pub struct TrayFlyout {
@@ -54,8 +53,8 @@ impl gpui::Render for TrayFlyout {
                             .text_xs()
                             .text_color(theme.muted_foreground)
                             .child(format!(
-                                "{} games · {} compacted · {} inflated",
-                                snapshot.total, snapshot.compacted, snapshot.inflated
+                                "{} compact · {} inflated",
+                                snapshot.compacted, snapshot.inflated
                             )),
                     )
                     .child(
@@ -85,30 +84,23 @@ impl gpui::Render for TrayFlyout {
                         Button::new("flyout-pause-live")
                             .outline()
                             .w_full()
-                            .label("Pause Live Compact")
+                            .label("Pause/Resume Live Compact")
                             .disabled(true)
-                            .tooltip("Coming soon — Engineer 4 will implement Live Compact."),
+                            .tooltip("Live Compact is later — Pause/Resume is a stub."),
                     )
                     .child(
                         Button::new("flyout-recompact")
                             .primary()
                             .w_full()
-                            .label("Recompact selected")
-                            .disabled(snapshot.selected_name.is_none() || snapshot.compact_busy)
-                            .on_click({
-                                let app = app.clone();
-                                move |_, window, cx| {
-                                    app.update(cx, |app, cx| {
-                                        app.start_compact(CompactOp::Compress, window, cx);
-                                    });
-                                }
-                            }),
+                            .label("Recompact last patch")
+                            .disabled(true)
+                            .tooltip("Last-patch recompact lands with Live Compact."),
                     )
                     .child(
                         Button::new("flyout-open-main")
                             .outline()
                             .w_full()
-                            .label("Open main window")
+                            .label("Open RusticGU")
                             .on_click({
                                 let app = app.clone();
                                 move |_, _, cx| {
@@ -124,7 +116,6 @@ impl gpui::Render for TrayFlyout {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FlyoutSnapshot {
-    pub total: usize,
     pub compacted: i32,
     pub inflated: i32,
     pub logical_bytes: u64,
@@ -132,7 +123,6 @@ pub(crate) struct FlyoutSnapshot {
     pub selected_name: Option<String>,
     pub selected_logical: Option<u64>,
     pub selected_on_disk: Option<u64>,
-    pub compact_busy: bool,
 }
 
 impl LibraryApp {
@@ -151,7 +141,6 @@ impl LibraryApp {
             .selected_app_id
             .and_then(|id| self.games.iter().find(|g| g.app_id == id));
         FlyoutSnapshot {
-            total: self.games.len(),
             compacted,
             inflated: uncompacted,
             logical_bytes,
@@ -159,7 +148,6 @@ impl LibraryApp {
             selected_name: selected.map(|g| g.name.clone()),
             selected_logical: selected.and_then(|g| g.logical_bytes),
             selected_on_disk: selected.and_then(|g| g.on_disk_bytes),
-            compact_busy: self.compact_busy,
         }
     }
 

@@ -72,8 +72,8 @@ impl LibraryApp {
                 .child(settings_subgroup("Compact", true, cx))
                 .child(settings_choice_row(
                     "WOF algorithm",
-                    Some("Always compact /EXE. Default is XPRESS8K. Never NTFS LZNT1."),
-                    h_flex().gap_2().children(CompactAlgorithm::ALL.into_iter().map(|algo| {
+                    Some("Always compact /EXE. Default XPRESS8K. LZX is Shelf only (later) and is not selectable here."),
+                    h_flex().gap_2().children(CompactAlgorithm::LIVE.into_iter().map(|algo| {
                         let selected = algorithm == algo;
                         Button::new(SharedString::from(format!("algo-{}", algo.label())))
                             .label(algo.label())

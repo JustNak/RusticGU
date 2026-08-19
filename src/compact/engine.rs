@@ -86,11 +86,12 @@ pub struct CompactResult {
     pub message: String,
 }
 
-/// Dry-run: walk the tree, apply the skip list, estimate savings.
+/// Dry-run: walk the tree, apply the skip list, estimate on-disk size.
 pub fn estimate_compact(
     root: &Path,
     algorithm: CompactAlgorithm,
 ) -> Result<CompactEstimate, String> {
+    let algorithm = algorithm.for_live_library();
     if !root.is_dir() {
         return Err("Game folder is missing.".into());
     }
@@ -319,6 +320,7 @@ pub fn apply_compact(
     allow_dstorage: bool,
     mut progress: impl FnMut(CompactProgress),
 ) -> Result<CompactResult, String> {
+    let algorithm = algorithm.for_live_library();
     preflight(root, allow_dstorage).map_err(|e| e.to_string())?;
     let estimate = estimate_compact(root, algorithm)?;
     progress(CompactProgress {
