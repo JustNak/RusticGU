@@ -37,8 +37,7 @@ impl MemoryHive {
         let nk = normalize_key(key);
         self.ensure_ancestors(&nk);
         let node = self.nodes.entry(nk).or_default();
-        node.values
-            .insert(name.to_ascii_lowercase(), value.into());
+        node.values.insert(name.to_ascii_lowercase(), value.into());
     }
 
     fn ensure_ancestors(&mut self, key: &str) {
@@ -48,11 +47,7 @@ impl MemoryHive {
             if i > 0 {
                 let parent = acc.clone();
                 let node = self.nodes.entry(parent).or_default();
-                if !node
-                    .subkeys
-                    .iter()
-                    .any(|s| s.eq_ignore_ascii_case(part))
-                {
+                if !node.subkeys.iter().any(|s| s.eq_ignore_ascii_case(part)) {
                     node.subkeys.push((*part).to_string());
                 }
                 acc.push('\\');
@@ -107,10 +102,7 @@ impl RegistryHive for WindowsHive {
         }
         let mut names = Vec::new();
         for k in opened {
-            let count = k
-                .enum_keys()
-                .filter_map(|r| r.ok())
-                .collect::<Vec<_>>();
+            let count = k.enum_keys().filter_map(|r| r.ok()).collect::<Vec<_>>();
             names.extend(count);
         }
         names.sort();
@@ -151,21 +143,19 @@ fn split_hive(key: &str) -> StoreResult<(winreg::RegKey, String)> {
         let _ = rest;
         Ok((RegKey::predef(HKEY_LOCAL_MACHINE), orig))
     } else {
-        Ok((
-            RegKey::predef(HKEY_LOCAL_MACHINE),
-            key.to_string(),
-        ))
+        Ok((RegKey::predef(HKEY_LOCAL_MACHINE), key.to_string()))
     }
 }
 
 #[cfg(windows)]
-fn open_both_views(
-    hive: winreg::RegKey,
-    sub: String,
-) -> Result<Vec<winreg::RegKey>, String> {
+fn open_both_views(hive: winreg::RegKey, sub: String) -> Result<Vec<winreg::RegKey>, String> {
     use winreg::enums::{KEY_READ, KEY_WOW64_32KEY, KEY_WOW64_64KEY};
     let mut out = Vec::new();
-    for flag in [KEY_READ | KEY_WOW64_32KEY, KEY_READ | KEY_WOW64_64KEY, KEY_READ] {
+    for flag in [
+        KEY_READ | KEY_WOW64_32KEY,
+        KEY_READ | KEY_WOW64_64KEY,
+        KEY_READ,
+    ] {
         if let Ok(k) = hive.open_subkey_with_flags(&sub, flag) {
             out.push(k);
         }

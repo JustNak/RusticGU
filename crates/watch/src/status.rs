@@ -96,7 +96,11 @@ pub fn title_from_acf(app: &VdfObject, steam_downloading: bool) -> WatchResult<T
     })
 }
 
-pub fn title_from_acf_text(path: &std::path::Path, text: &str, steam_downloading: bool) -> WatchResult<TitleStatus> {
+pub fn title_from_acf_text(
+    path: &std::path::Path,
+    text: &str,
+    steam_downloading: bool,
+) -> WatchResult<TitleStatus> {
     let v = parse_vdf_path(path, text)?;
     title_from_acf(v.app_state(), steam_downloading)
 }

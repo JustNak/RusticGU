@@ -20,6 +20,8 @@ impl LibraryApp {
             return;
         }
         apply_appearance(&self.settings, Some(window), cx);
+        self.live
+            .set_allow_dstorage(self.settings.allow_dstorage_override);
         self.sync_tray_lifetime(cx);
         let _ = apply_launch_at_startup(
             self.settings.launch_at_startup,
@@ -185,6 +187,15 @@ impl LibraryApp {
         cx: &mut Context<Self>,
     ) {
         self.settings.notify_on_fail = on;
+        cx.notify();
+    }
+
+    pub(crate) fn set_include_xbox_games(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.settings.include_xbox_games == on {
+            return;
+        }
+        self.settings.include_xbox_games = on;
+        self.refresh_library(cx);
         cx.notify();
     }
 

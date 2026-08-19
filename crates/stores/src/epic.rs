@@ -23,7 +23,10 @@ struct EpicManifest {
 
 /// Parse Epic Games Launcher `*.item` / `*.json` manifests in `Manifests`.
 /// Does not walk volumes — only the official manifest directory.
-pub fn discover(fs: &impl IndexFs, manifests_dir: &Path) -> (Vec<DiscoveredTitle>, Vec<StoreWarning>) {
+pub fn discover(
+    fs: &impl IndexFs,
+    manifests_dir: &Path,
+) -> (Vec<DiscoveredTitle>, Vec<StoreWarning>) {
     let mut titles = Vec::new();
     let mut warnings = Vec::new();
     if !fs.is_dir(manifests_dir) {
@@ -55,7 +58,8 @@ pub fn discover(fs: &impl IndexFs, manifests_dir: &Path) -> (Vec<DiscoveredTitle
 
 fn parse_manifest(fs: &impl IndexFs, path: &Path) -> StoreResult<Option<DiscoveredTitle>> {
     let text = fs.read_to_string(path)?;
-    let m: EpicManifest = serde_json::from_str(&text).map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
+    let m: EpicManifest = serde_json::from_str(&text)
+        .map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
     if m.is_incomplete == Some(true) {
         return Ok(None);
     }

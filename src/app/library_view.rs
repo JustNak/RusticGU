@@ -1,4 +1,4 @@
-//! Steam library cards + compact actions.
+//! Library cards + compact actions.
 
 use gpui::{
     div, prelude::FluentBuilder, px, Context, InteractiveElement, IntoElement, ParentElement,
@@ -11,15 +11,15 @@ use gpui_component::{
 
 use super::widgets::{empty_state_badge, styled_progress};
 use super::LibraryApp;
-use crate::compact::{path_is_auto_excluded, title_is_auto_excluded, CompactOp};
+use crate::compact::CompactOp;
 use crate::format::format_size_pair;
-use crate::library::SteamGame;
+use crate::library::{title_is_compact_excluded, LibraryTitle};
 
 impl LibraryApp {
     pub(crate) fn render_library(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let games = self.visible_games(cx);
-        let selected = self.selected_app_id;
+        let selected = self.selected_id.clone();
         let scanning = self.library_scanning;
         let error = self.library_error.clone();
         let progress = self.compact_progress.clone();
@@ -44,11 +44,11 @@ impl LibraryApp {
                                     .text_lg()
                                     .font_bold()
                                     .text_color(theme.foreground)
-                                    .child("Steam library"),
+                                    .child("Library"),
                             )
                             .child(div().text_xs().text_color(theme.muted_foreground).child(
                                 if scanning {
-                                    "Scanning Steam libraries…".to_string()
+                                    "Scanning launchers…".to_string()
                                 } else {
                                     format!("{} games", self.games.len())
                                 },
@@ -111,7 +111,7 @@ impl LibraryApp {
                             .flex_wrap()
                             .gap_3()
                             .children(games.into_iter().map(|game| {
-                                let is_selected = selected == Some(game.app_id);
+                                let is_selected = selected.as_deref() == Some(game.id.as_str());
                                 render_game_card(game, is_selected, busy, cx)
                             })),
                     )
@@ -137,31 +137,41 @@ impl LibraryApp {
                 div()
                     .text_sm()
                     .text_color(theme.muted_foreground)
-                    .child("No Steam games found. Install Steam or rescan."),
+                    .child("No games found. Install a launcher or rescan."),
             )
     }
 }
 
+fn card_dom_id(id: &str) -> SharedString {
+    let safe: String = id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    format!("game-card-{safe}").into()
+}
+
 fn render_game_card(
-    game: SteamGame,
+    game: LibraryTitle,
     selected: bool,
     busy: bool,
     cx: &mut Context<LibraryApp>,
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
-    let app_id = game.app_id;
+    let id = game.id.clone();
     let size = format_size_pair(game.logical_bytes, game.on_disk_bytes);
-    let compacted = game
-        .on_disk_bytes
-        .zip(game.logical_bytes)
-        .is_some_and(|(disk, logical)| disk < logical.saturating_sub(logical / 20));
+    let compacted = game.is_compacted();
     let path = game.install_path.display().to_string();
-    let excluded = title_is_auto_excluded(&game.name) || path_is_auto_excluded(&game.install_path);
+    let excluded = title_is_compact_excluded(&game);
+    let badge = game.store.badge();
+    let subtitle = match game.steam_app_id() {
+        Some(app_id) => format!("{badge} {app_id}"),
+        None => badge.to_string(),
+    };
 
     v_flex()
-        .id(SharedString::from(format!("game-card-{app_id}")))
+        .id(card_dom_id(&id))
         .w(px(260.))
-        .min_h(px(168.))
+        .min_h(px(188.))
         .p_3()
         .gap_2()
         .rounded(theme.radius_lg)
@@ -180,9 +190,12 @@ fn render_game_card(
         })
         .hover(|s| s.bg(theme.secondary.opacity(0.7)))
         .cursor_pointer()
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.select_game(app_id, cx);
-        }))
+        .on_click({
+            let id = id.clone();
+            cx.listener(move |this, _, _, cx| {
+                this.select_game(id.clone(), cx);
+            })
+        })
         .child(
             h_flex()
                 .w_full()
@@ -216,10 +229,24 @@ fn render_game_card(
                 ),
         )
         .child(
-            div()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child(format!("Steam {app_id}")),
+            h_flex()
+                .gap_1()
+                .child(
+                    div()
+                        .px_1p5()
+                        .py_0p5()
+                        .rounded(theme.radius)
+                        .bg(theme.secondary.opacity(0.7))
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(badge),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.muted_foreground)
+                        .child(subtitle),
+                ),
         )
         .child(
             div()
@@ -237,8 +264,19 @@ fn render_game_card(
             el.child(
                 h_flex()
                     .gap_2()
+                    .flex_wrap()
                     .child(
-                        Button::new(SharedString::from(format!("estimate-{app_id}")))
+                        Button::new(SharedString::from(format!("launch-{id}")))
+                            .outline()
+                            .small()
+                            .label("Launch")
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.launch_selected(window, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("estimate-{id}")))
                             .outline()
                             .small()
                             .label("Estimate")
@@ -248,7 +286,7 @@ fn render_game_card(
                             })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("compact-{app_id}")))
+                        Button::new(SharedString::from(format!("compact-{id}")))
                             .primary()
                             .small()
                             .label("Compact")
@@ -258,7 +296,7 @@ fn render_game_card(
                             })),
                     )
                     .child(
-                        Button::new(SharedString::from(format!("undo-{app_id}")))
+                        Button::new(SharedString::from(format!("undo-{id}")))
                             .outline()
                             .small()
                             .label("Undo")

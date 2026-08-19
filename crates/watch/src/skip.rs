@@ -17,22 +17,74 @@ use std::path::Path;
 /// Already-compressed / not-worth-WOF extensions (no leading dot).
 pub const SKIP_EXTENSIONS: &[&str] = &[
     // video
-    "bik", "bk2", "bik2", "pc_binkvid", "mp4", "webm", "mkv", "avi", "wmv", "flv", "mpg", "m2v",
-    "m4v", "vob", "usm", "ivf",
+    "bik",
+    "bk2",
+    "bik2",
+    "pc_binkvid",
+    "mp4",
+    "webm",
+    "mkv",
+    "avi",
+    "wmv",
+    "flv",
+    "mpg",
+    "m2v",
+    "m4v",
+    "vob",
+    "usm",
+    "ivf",
     // audio
-    "mp3", "ogg", "wma", "flac", "opus", "m4a", "aac", "wem", "fsb", "xwma",
+    "mp3",
+    "ogg",
+    "wma",
+    "flac",
+    "opus",
+    "m4a",
+    "aac",
+    "wem",
+    "fsb",
+    "xwma",
     // textures / images
-    "jpg", "jpeg", "png", "webp", "ktx", "ktx2", "basis", "basisu", "astc", "pvr", "crn", "tfc",
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "ktx",
+    "ktx2",
+    "basis",
+    "basisu",
+    "astc",
+    "pvr",
+    "crn",
+    "tfc",
     // archives
-    "zip", "7z", "rar", "gz", "xz", "cab", "bz2", "tgz", "lz", "txz", "dmg", "lzx", "br", "lz4",
-    "lzma", "zst", "zstd",
+    "zip",
+    "7z",
+    "rar",
+    "gz",
+    "xz",
+    "cab",
+    "bz2",
+    "tgz",
+    "lz",
+    "txz",
+    "dmg",
+    "lzx",
+    "br",
+    "lz4",
+    "lzma",
+    "zst",
+    "zstd",
     // junk
-    "log", "dmp", "tmp",
+    "log",
+    "dmp",
+    "tmp",
 ];
 
 /// Explicitly compact-eligible extensions (must never appear in [`SKIP_EXTENSIONS`]).
 pub const ELIGIBLE_EXTENSIONS: &[&str] = &[
-    "wav", "dds", "bnk", "vpk", "vpak", "pak", "cpk", "arc", "dat", "bin", "uasset", "uexp", "ubulk",
+    "wav", "dds", "bnk", "vpk", "vpak", "pak", "cpk", "arc", "dat", "bin", "uasset", "uexp",
+    "ubulk",
 ];
 
 /// Folder segment names that are GPU / pipeline caches, not game files.
@@ -132,9 +184,10 @@ pub fn folder_is_skipped(path: &Path) -> bool {
         return true;
     }
     let segs = path_segments(path);
-    if segs.windows(2).any(|w| {
-        w[0].eq_ignore_ascii_case("Saved") && w[1].eq_ignore_ascii_case("PipelineCaches")
-    }) {
+    if segs
+        .windows(2)
+        .any(|w| w[0].eq_ignore_ascii_case("Saved") && w[1].eq_ignore_ascii_case("PipelineCaches"))
+    {
         return true;
     }
     segs.iter().any(|seg| {
@@ -190,7 +243,13 @@ mod tests {
 
     #[test]
     fn media_archives_logs_are_skipped() {
-        for name in ["cutscene.mp4", "voice.wem", "tex.ktx2", "pack.zst", "debug.log"] {
+        for name in [
+            "cutscene.mp4",
+            "voice.wem",
+            "tex.ktx2",
+            "pack.zst",
+            "debug.log",
+        ] {
             assert!(
                 extension_is_skipped(Path::new(name)),
                 "{name} should be skipped"
@@ -225,7 +284,9 @@ mod tests {
         assert!(is_save_folder_path(Path::new(
             r"game\Saved\SaveGames\slot.sav"
         )));
-        assert!(!is_save_folder_path(Path::new(r"game\Saved\Config\Game.ini")));
+        assert!(!is_save_folder_path(Path::new(
+            r"game\Saved\Config\Game.ini"
+        )));
         assert!(!is_save_folder_path(Path::new(r"game\data\foo.dat")));
         assert!(is_compact_candidate(Path::new(r"game\data\foo.dat")));
         assert!(is_compact_candidate(Path::new(r"game\Saved\Paks\pak.bin")));

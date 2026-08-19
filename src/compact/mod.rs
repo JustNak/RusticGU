@@ -7,13 +7,18 @@ mod engine;
 mod skip;
 
 #[allow(unused_imports)]
-pub use command::{apply_target_paths, build_apply_invocations, build_compact_command, CompactOp};
+pub use command::{
+    apply_target_paths, build_apply_invocations, build_apply_invocations_with,
+    build_compact_command, build_incremental_invocations, build_wof_files_command, CompactOp,
+};
 #[allow(unused_imports)]
 pub use command::{
-    invocation_recurses_install_root, is_lznt1_command, is_wof_exe_command, CompactInvocation,
+    invocation_has_force_flag, invocation_recurses_install_root, is_lznt1_command,
+    is_wof_exe_command, CompactInvocation,
 };
 pub use engine::{
-    apply_compact, estimate_compact, preflight, CompactEstimate, CompactProgress, CompactRefuse,
+    apply_compact, apply_compact_allowing_lzx, apply_incremental, estimate_compact,
+    estimate_compact_with, preflight, CompactEstimate, CompactProgress, CompactRefuse,
 };
 #[allow(unused_imports)]
 pub use engine::{

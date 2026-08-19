@@ -293,14 +293,17 @@ pub enum CompactAlgorithm {
     #[default]
     Xpress8k,
     Xpress16k,
+    /// Walk-back from a shelved LZX title (`/EXE:XPRESS`). Not on the live picker.
+    Xpress,
     Lzx,
 }
 
 impl CompactAlgorithm {
-    pub const ALL: [CompactAlgorithm; 4] = [
+    pub const ALL: [CompactAlgorithm; 5] = [
         CompactAlgorithm::Xpress4k,
         CompactAlgorithm::Xpress8k,
         CompactAlgorithm::Xpress16k,
+        CompactAlgorithm::Xpress,
         CompactAlgorithm::Lzx,
     ];
 
@@ -316,6 +319,7 @@ impl CompactAlgorithm {
             Self::Xpress4k => "XPRESS4K",
             Self::Xpress8k => "XPRESS8K",
             Self::Xpress16k => "XPRESS16K",
+            Self::Xpress => "XPRESS",
             Self::Lzx => "LZX",
         }
     }
@@ -390,6 +394,9 @@ pub struct Settings {
     /// Allow compacting trees that contain `dstorage.dll` (DirectStorage).
     #[serde(default)]
     pub allow_dstorage_override: bool,
+    /// GDK / XboxGames discovery is opt-in. Never WindowsApps.
+    #[serde(default)]
+    pub include_xbox_games: bool,
 }
 
 impl Default for Settings {
@@ -418,6 +425,7 @@ impl Default for Settings {
             notify_on_fail: true,
             compact_algorithm: CompactAlgorithm::Xpress8k,
             allow_dstorage_override: false,
+            include_xbox_games: false,
         }
     }
 }
@@ -473,6 +481,7 @@ mod tests {
         assert!(json.contains("\"compactAlgorithm\""));
         assert!(json.contains("\"allowDstorageOverride\""));
         assert!(json.contains("\"osNotifyMode\""));
+        assert!(json.contains("\"includeXboxGames\""));
         assert!(!json.contains("\"update_channel\""));
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded, settings);
@@ -483,6 +492,7 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.theme, AppTheme::Dark);
         assert_eq!(s.accent_preset, AccentPreset::Orange);
+        assert!(!s.include_xbox_games);
         assert_eq!(s.compact_algorithm, CompactAlgorithm::Xpress8k);
         assert_eq!(s.compact_algorithm.exe_flag(), "XPRESS8K");
         assert!(CompactAlgorithm::LIVE
@@ -526,6 +536,7 @@ mod tests {
         assert_eq!(s.compact_algorithm, CompactAlgorithm::Xpress8k);
         assert!(s.close_to_tray);
         assert!(!s.allow_dstorage_override);
+        assert!(!s.include_xbox_games);
     }
 
     #[test]

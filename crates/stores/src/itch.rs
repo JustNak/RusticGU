@@ -80,7 +80,9 @@ fn parse_fetch_caves(text: &str, path: &Path) -> Result<Vec<DiscoveredTitle>, St
         }
     }
     let parsed: FetchCaves = serde_json::from_value(Value::Object(
-        [("caves".into(), Value::Array(caves))].into_iter().collect(),
+        [("caves".into(), Value::Array(caves))]
+            .into_iter()
+            .collect(),
     ))
     .map_err(|e| StoreError::parse(path, e.to_string()))?;
     Ok(parsed.caves.into_iter().filter_map(cave_to_title).collect())

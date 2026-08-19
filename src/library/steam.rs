@@ -259,15 +259,21 @@ pub fn game_from_acf(text: &str, library_path: &Path) -> Option<SteamGame> {
 }
 
 fn fill_cheap_sizes(game: &mut SteamGame) {
-    if !game.install_path.is_dir() {
-        return;
-    }
+    let (logical, on_disk) = cheap_install_sizes(&game.install_path);
     if game.logical_bytes.is_none() {
-        if let Some(meta) = cheap_dir_size(&game.install_path) {
-            game.logical_bytes = Some(meta);
-        }
+        game.logical_bytes = logical;
     }
-    game.on_disk_bytes = cheap_on_disk_size(&game.install_path).or(game.logical_bytes);
+    game.on_disk_bytes = on_disk.or(game.logical_bytes);
+}
+
+/// Shallow logical / on-disk sizes for an install folder (no full tree walk).
+pub fn cheap_install_sizes(path: &Path) -> (Option<u64>, Option<u64>) {
+    if !path.is_dir() {
+        return (None, None);
+    }
+    let logical = cheap_dir_size(path);
+    let on_disk = cheap_on_disk_size(path).or(logical);
+    (logical, on_disk)
 }
 
 /// Shallow size: immediate children only (cheap; no full tree walk).

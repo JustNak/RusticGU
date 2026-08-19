@@ -85,16 +85,35 @@ impl gpui::Render for TrayFlyout {
                             .outline()
                             .w_full()
                             .label("Pause/Resume Live Compact")
-                            .disabled(true)
-                            .tooltip("Live Compact is later — Pause/Resume is a stub."),
+                            .tooltip(if snapshot.live_paused {
+                                "Live Compact is paused. Click to resume."
+                            } else {
+                                "Pause Live Compact after patches."
+                            })
+                            .on_click({
+                                let app = app.clone();
+                                move |_, _, cx| {
+                                    app.update(cx, |app, cx| {
+                                        app.toggle_live_compact(cx);
+                                    });
+                                }
+                            }),
                     )
                     .child(
                         Button::new("flyout-recompact")
                             .primary()
                             .w_full()
                             .label("Recompact last patch")
-                            .disabled(true)
-                            .tooltip("Last-patch recompact lands with Live Compact."),
+                            .disabled(!snapshot.has_last_plan || snapshot.compact_busy)
+                            .tooltip("Recompact files from the last Steam patch.")
+                            .on_click({
+                                let app = app.clone();
+                                move |_, _, cx| {
+                                    app.update(cx, |app, cx| {
+                                        app.recompact_last_patch(cx);
+                                    });
+                                }
+                            }),
                     )
                     .child(
                         Button::new("flyout-open-main")
@@ -123,6 +142,9 @@ pub(crate) struct FlyoutSnapshot {
     pub selected_name: Option<String>,
     pub selected_logical: Option<u64>,
     pub selected_on_disk: Option<u64>,
+    pub live_paused: bool,
+    pub has_last_plan: bool,
+    pub compact_busy: bool,
 }
 
 impl LibraryApp {
@@ -138,8 +160,9 @@ impl LibraryApp {
             }
         };
         let selected = self
-            .selected_app_id
-            .and_then(|id| self.games.iter().find(|g| g.app_id == id));
+            .selected_id
+            .as_ref()
+            .and_then(|id| self.games.iter().find(|g| g.id == *id));
         FlyoutSnapshot {
             compacted,
             inflated: uncompacted,
@@ -148,6 +171,9 @@ impl LibraryApp {
             selected_name: selected.map(|g| g.name.clone()),
             selected_logical: selected.and_then(|g| g.logical_bytes),
             selected_on_disk: selected.and_then(|g| g.on_disk_bytes),
+            live_paused: self.live.paused(),
+            has_last_plan: self.live.last_plan().is_some(),
+            compact_busy: self.compact_busy,
         }
     }
 

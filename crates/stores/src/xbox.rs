@@ -7,7 +7,10 @@ use crate::util::{extract_xml_value, looks_like_volume_root, path_contains_compo
 
 /// GDK / XboxGames discovery. **Opt-in only.** Caller must pass explicit
 /// library roots (never a drive letter). WindowsApps is refused.
-pub fn discover(fs: &impl IndexFs, roots: &[std::path::PathBuf]) -> (Vec<DiscoveredTitle>, Vec<StoreWarning>) {
+pub fn discover(
+    fs: &impl IndexFs,
+    roots: &[std::path::PathBuf],
+) -> (Vec<DiscoveredTitle>, Vec<StoreWarning>) {
     let mut titles = Vec::new();
     let mut warnings = Vec::new();
     for root in roots {

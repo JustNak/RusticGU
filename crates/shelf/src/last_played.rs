@@ -223,11 +223,7 @@ struct Vdf {
 }
 
 fn find_apps<'a>(root: &'a Vdf) -> Option<&'a Vdf> {
-    if root
-        .children
-        .keys()
-        .any(|k| k.eq_ignore_ascii_case("apps"))
-    {
+    if root.children.keys().any(|k| k.eq_ignore_ascii_case("apps")) {
         return root
             .children
             .iter()

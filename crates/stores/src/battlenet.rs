@@ -113,11 +113,7 @@ fn read_product_json(fs: &impl IndexFs, path: &Path) -> Result<Vec<DiscoveredTit
         serde_json::from_str(&text).map_err(|e| StoreError::parse(path, e.to_string()))?;
     let mut out = Vec::new();
     for p in parsed.product_installs {
-        let code = p
-            .product_code
-            .as_deref()
-            .or(p.uid.as_deref())
-            .unwrap_or("");
+        let code = p.product_code.as_deref().or(p.uid.as_deref()).unwrap_or("");
         if NOT_GAMES.iter().any(|n| code.eq_ignore_ascii_case(n)) {
             continue;
         }

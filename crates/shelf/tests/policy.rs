@@ -81,7 +81,11 @@ fn secret_world_legends_and_lotro_are_excluded() {
             other => panic!("{name} should be excluded, got {other:?}"),
         }
     }
-    for name in ["The Lord of the Rings Online", "LOTRO", "lord of the rings online"] {
+    for name in [
+        "The Lord of the Rings Online",
+        "LOTRO",
+        "lord of the rings online",
+    ] {
         match decide(PolicyInput::new(name)) {
             CompactPolicy::Exclude { reason } => {
                 assert!(reason.to_ascii_lowercase().contains("lotro") || reason.contains("Rings"));
@@ -93,8 +97,14 @@ fn secret_world_legends_and_lotro_are_excluded() {
 
 #[test]
 fn ark_and_eso_are_not_default_excluded() {
-    assert_eq!(decide(PolicyInput::new("ARK: Survival Evolved")), CompactPolicy::Lzx);
-    assert_eq!(decide(PolicyInput::new("The Elder Scrolls Online")), CompactPolicy::Lzx);
+    assert_eq!(
+        decide(PolicyInput::new("ARK: Survival Evolved")),
+        CompactPolicy::Lzx
+    );
+    assert_eq!(
+        decide(PolicyInput::new("The Elder Scrolls Online")),
+        CompactPolicy::Lzx
+    );
     assert_eq!(decide(PolicyInput::new("Warframe")), CompactPolicy::Lzx);
 }
 

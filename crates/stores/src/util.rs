@@ -12,10 +12,9 @@ pub fn percent_decode(input: &str) -> String {
                 i += 1;
             }
             b'%' if i + 2 < bytes.len() => {
-                if let Ok(v) = u8::from_str_radix(
-                    std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                    16,
-                ) {
+                if let Ok(v) =
+                    u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+                {
                     out.push(v);
                     i += 3;
                 } else {
@@ -157,7 +156,6 @@ pub fn path_contains_component(path: &Path, name: &str) -> bool {
             .is_some_and(|s| s.eq_ignore_ascii_case(name))
     })
 }
-
 
 #[cfg(test)]
 mod tests {

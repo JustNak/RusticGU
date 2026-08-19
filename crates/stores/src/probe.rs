@@ -22,7 +22,11 @@ pub struct StoreProbe<F, R> {
 
 impl<F: IndexFs, R: RegistryHive> StoreProbe<F, R> {
     pub fn new(fs: F, registry: R, roots: PathRoots) -> Self {
-        Self { fs, registry, roots }
+        Self {
+            fs,
+            registry,
+            roots,
+        }
     }
 
     pub fn discover_all(&self, opts: &DiscoverOptions) -> DiscoverReport {
