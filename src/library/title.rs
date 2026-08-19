@@ -21,6 +21,8 @@ pub struct LibraryTitle {
     pub steam_app_id: Option<u32>,
     pub steam_library_path: Option<PathBuf>,
     pub steam_install_dir_name: Option<String>,
+    /// itch `coverUrl` / `stillCoverUrl` from Fetch.Caves JSON only. Never scraped HTML.
+    pub cover_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -98,6 +100,7 @@ impl LibraryTitle {
             steam_app_id: Some(game.app_id),
             steam_library_path: Some(game.library_path),
             steam_install_dir_name: Some(game.install_dir_name),
+            cover_url: None,
         }
     }
 
@@ -119,6 +122,7 @@ impl LibraryTitle {
             steam_app_id: None,
             steam_library_path: None,
             steam_install_dir_name: None,
+            cover_url: None,
         }
     }
 

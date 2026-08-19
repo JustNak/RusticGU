@@ -6,9 +6,7 @@ use crate::settings::CompactAlgorithm;
 
 use crate::library::steam_updating_app_id;
 
-use super::command::{
-    build_apply_invocations_with, build_compact_command, build_incremental_invocations, CompactOp,
-};
+use super::command::{build_apply_invocations_with, build_incremental_invocations, CompactOp};
 use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
@@ -625,6 +623,7 @@ fn windows_run_elevated(inv: &super::command::CompactInvocation) -> Result<Comma
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compact::build_compact_command;
     use crate::compact::command::{is_lznt1_command, is_wof_exe_command};
 
     #[test]

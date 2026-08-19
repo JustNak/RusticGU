@@ -1,5 +1,8 @@
 mod about_dialog;
+mod compact_apply;
+mod compact_dialog;
 mod confirm_dialogs;
+mod cover_flow;
 mod filter;
 mod library_view;
 mod settings_actions;
@@ -16,11 +19,13 @@ mod widgets;
 pub use filter::FilterKind;
 pub(crate) use settings_category::SettingsCategory;
 
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 
 use gpui::{
-    canvas, div, prelude::FluentBuilder, App, AppContext, Context, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
+    canvas, div, prelude::FluentBuilder, AnyWindowHandle, App, AppContext, Context, Focusable,
+    InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
 };
 use gpui_component::{
     input::InputState,
@@ -33,15 +38,13 @@ use crate::appearance::{
     apply_appearance, film_grain_image, noise_enabled, vignette_edge_alpha, vignette_enabled,
 };
 use crate::compact::{
-    apply_compact, apply_compact_allowing_lzx, estimate_compact, estimate_compact_with, preflight,
-    CompactOp, CompactProgress, CompactRefuse,
+    apply_compact, estimate_compact, estimate_compact_with, CompactOp, CompactProgress,
 };
 use crate::library::{
     algorithm_from_policy, scan_library, shelf_policy_for, steam_title_id,
     title_is_compact_excluded, LibraryTitle,
 };
 use crate::live::LiveHandle;
-use crate::notifications::notify_compact;
 use crate::persistence::{
     load_pending_whats_new, load_state, save_settings, save_state, AppPaths, AppState,
     PendingWhatsNew,
@@ -62,6 +65,10 @@ pub struct LibraryApp {
     pub(crate) settings_return_filter: FilterKind,
     pub(crate) settings_category: SettingsCategory,
     pub(crate) selected_id: Option<String>,
+    pub(crate) selected_ids: HashSet<String>,
+    pub(crate) hovered_id: Option<String>,
+    pub(crate) covers: HashMap<String, Arc<gpui::RenderImage>>,
+    pub(crate) cover_inflight: HashSet<String>,
     pub(crate) library_scanning: bool,
     pub(crate) library_error: Option<String>,
     pub(crate) compact_busy: bool,
@@ -91,7 +98,9 @@ pub struct LibraryApp {
     pub(crate) main_hwnd: isize,
     pub(crate) pending_tray_show: bool,
     pub(crate) pending_toggle_flyout: bool,
+    pub(crate) pending_open_compact: bool,
     pub(crate) flyout_open: bool,
+    pub(crate) flyout_window: Option<AnyWindowHandle>,
     pub(crate) activate: ActivateBridge,
     pub(crate) live: LiveHandle,
 }
@@ -168,6 +177,10 @@ impl LibraryApp {
             selected_id: state
                 .selected_title_id
                 .or_else(|| state.selected_app_id.map(steam_title_id)),
+            selected_ids: HashSet::new(),
+            hovered_id: None,
+            covers: HashMap::new(),
+            cover_inflight: HashSet::new(),
             library_scanning: true,
             library_error: None,
             compact_busy: false,
@@ -197,10 +210,15 @@ impl LibraryApp {
             main_hwnd: 0,
             pending_tray_show: false,
             pending_toggle_flyout: false,
+            pending_open_compact: false,
             flyout_open: false,
+            flyout_window: None,
             activate,
             live: LiveHandle::start(),
         };
+        if let Some(id) = app.selected_id.clone() {
+            app.selected_ids.insert(id);
+        }
         app.live
             .set_allow_dstorage(app.settings.allow_dstorage_override);
         app.subscribe_sliders(cx);
@@ -291,15 +309,27 @@ impl LibraryApp {
             let _ = this.update(cx, |app, cx| {
                 app.library_scanning = false;
                 match result {
-                    Ok(games) => {
+                    Ok(mut games) => {
+                        crate::covers::attach_itch_cover_urls(
+                            &mut games,
+                            crate::library::extra_store_roots(false)
+                                .itch_config
+                                .as_deref(),
+                        );
                         app.games = games;
                         app.library_error = None;
+                        app.prune_selection();
                         if app.selected_id.is_none() {
-                            app.selected_id = app.games.first().map(|g| g.id.clone());
+                            if let Some(first) = app.games.first() {
+                                app.selected_id = Some(first.id.clone());
+                                app.selected_ids.insert(first.id.clone());
+                            }
                         }
                         app.live.sync_titles(&app.games);
                         app.live
                             .set_allow_dstorage(app.settings.allow_dstorage_override);
+                        app.hydrate_covers_from_disk();
+                        app.request_covers(cx);
                     }
                     Err(msg) => {
                         app.games.clear();
@@ -341,9 +371,73 @@ impl LibraryApp {
     }
 
     pub(crate) fn select_game(&mut self, id: String, cx: &mut Context<Self>) {
+        self.selected_ids.clear();
+        self.selected_ids.insert(id.clone());
         self.selected_id = Some(id);
         self.flush_state_now();
         cx.notify();
+    }
+
+    pub(crate) fn select_game_click(&mut self, id: String, multi: bool, cx: &mut Context<Self>) {
+        if multi {
+            if self.selected_ids.contains(&id) {
+                self.selected_ids.remove(&id);
+                if self.selected_id.as_deref() == Some(id.as_str()) {
+                    self.selected_id = self.selected_ids.iter().next().cloned();
+                }
+            } else {
+                self.selected_ids.insert(id.clone());
+                self.selected_id = Some(id);
+            }
+        } else {
+            self.selected_ids.clear();
+            self.selected_ids.insert(id.clone());
+            self.selected_id = Some(id);
+        }
+        self.flush_state_now();
+        cx.notify();
+    }
+
+    pub(crate) fn prune_selection(&mut self) {
+        let known: HashSet<String> = self.games.iter().map(|g| g.id.clone()).collect();
+        self.selected_ids.retain(|id| known.contains(id));
+        if let Some(id) = self.selected_id.clone() {
+            if !known.contains(&id) {
+                self.selected_id = self.selected_ids.iter().next().cloned();
+            }
+        }
+        if self.selected_id.is_none() {
+            self.selected_id = self.selected_ids.iter().next().cloned();
+        }
+    }
+
+    pub(crate) fn selected_titles(&self) -> Vec<LibraryTitle> {
+        let mut titles: Vec<LibraryTitle> = self
+            .games
+            .iter()
+            .filter(|g| self.selected_ids.contains(&g.id))
+            .cloned()
+            .collect();
+        if titles.is_empty() {
+            if let Some(game) = self.selected_game() {
+                titles.push(game.clone());
+            }
+        }
+        titles
+    }
+
+    pub(crate) fn cover_image(&self, id: &str) -> Option<Arc<gpui::RenderImage>> {
+        self.covers.get(id).cloned()
+    }
+
+    pub(crate) fn open_install_folder(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(game) = self.games.iter().find(|g| g.id == id) else {
+            self.show_toast("Select a game first.", cx);
+            return;
+        };
+        if let Err(err) = open::that(&game.install_path) {
+            self.show_error_toast(format!("Could not open folder: {err}"), cx);
+        }
     }
 
     pub(crate) fn library_counts(&self) -> (i32, i32, i32) {
@@ -426,175 +520,12 @@ impl LibraryApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.compact_busy {
-            self.show_toast("A compact job is already running.", cx);
-            return;
-        }
-        let Some(game) = self.selected_game().cloned() else {
-            self.show_toast("Select a game first.", cx);
-            return;
-        };
-        if title_is_compact_excluded(&game) {
-            self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
-            return;
-        }
-        if let Some(app_id) = game.steam_app_id() {
-            if self.live.is_locked(&app_id.to_string()) {
-                self.show_error_toast(
-                    format!(
-                        "{} is patching. Live Compact has locked this title.",
-                        game.name
-                    ),
-                    cx,
-                );
-                return;
+        match op {
+            CompactOp::Compress => self.open_compact_level_dialog(window, cx),
+            CompactOp::Uncompress => {
+                self.apply_compact_jobs(self.selected_titles(), op, None, window, cx)
             }
         }
-        match preflight(&game.install_path, self.settings.allow_dstorage_override) {
-            Err(CompactRefuse::DirectStorage { .. }) => {
-                if let Ok(estimate) = estimate_compact(
-                    &game.install_path,
-                    self.settings.compact_algorithm.for_live_library(),
-                ) {
-                    self.open_dstorage_warning(window, cx, estimate);
-                } else {
-                    self.show_error_toast(
-                        "dstorage.dll or dstoragecore.dll is present. Enable the override in Settings → General to compact.",
-                        cx,
-                    );
-                }
-                return;
-            }
-            Err(err) => {
-                self.show_error_toast(err.to_string(), cx);
-                return;
-            }
-            Ok(()) => {}
-        }
-
-        let algorithm = match op {
-            CompactOp::Uncompress => self.settings.compact_algorithm.for_live_library(),
-            CompactOp::Compress => match self.compact_algorithm_for(&game, false) {
-                Some(algo) => algo,
-                None => {
-                    self.show_error_toast(
-                        format!("{} is auto-excluded from compact.", game.name),
-                        cx,
-                    );
-                    return;
-                }
-            },
-        };
-        let estimate = if algorithm == CompactAlgorithm::Lzx {
-            estimate_compact_with(&game.install_path, algorithm)
-        } else {
-            estimate_compact(&game.install_path, algorithm)
-        };
-        match estimate {
-            Ok(estimate) => {
-                let verb = match op {
-                    CompactOp::Compress => "Compact",
-                    CompactOp::Uncompress => "Uncompact",
-                };
-                self.show_toast(
-                    format!(
-                        "{verb} estimate: {} files, skip {}.",
-                        estimate.file_count, estimate.skipped_count
-                    ),
-                    cx,
-                );
-            }
-            Err(msg) => {
-                self.show_error_toast(msg, cx);
-                return;
-            }
-        }
-
-        self.compact_busy = true;
-        self.live.set_compact_busy(true);
-        self.compact_progress = Some(CompactProgress {
-            processed: 0,
-            total: 1,
-            message: "Starting…".into(),
-        });
-        cx.notify();
-
-        let allow = self.settings.allow_dstorage_override;
-        let allow_lzx = algorithm == CompactAlgorithm::Lzx;
-        let path = game.install_path.clone();
-        let name = game.name.clone();
-        let (tx, rx) = async_channel::unbounded::<Result<CompactProgress, String>>();
-        std::thread::spawn(move || {
-            let result = if allow_lzx {
-                apply_compact_allowing_lzx(op, &path, algorithm, allow, |progress| {
-                    let _ = tx.send_blocking(Ok(progress));
-                })
-            } else {
-                apply_compact(op, &path, algorithm, allow, |progress| {
-                    let _ = tx.send_blocking(Ok(progress));
-                })
-            };
-            match result {
-                Ok(done) => {
-                    let _ = tx.send_blocking(Ok(CompactProgress {
-                        processed: 1,
-                        total: 1,
-                        message: done.message,
-                    }));
-                }
-                Err(err) => {
-                    let _ = tx.send_blocking(Err(err));
-                }
-            }
-        });
-
-        cx.spawn(async move |this, cx| {
-            while let Ok(item) = rx.recv().await {
-                let cont = this.update(cx, |app, cx| match item {
-                    Ok(progress) => {
-                        let finished = progress.message.contains("WOF /EXE")
-                            || progress.message == "Finished.";
-                        app.compact_progress = Some(progress.clone());
-                        if finished {
-                            app.compact_busy = false;
-                            app.live.set_compact_busy(false);
-                            app.show_toast(progress.message.clone(), cx);
-                            notify_compact(
-                                app.system_tray.as_ref(),
-                                app.settings.os_notify_mode,
-                                app.window_hidden_to_tray,
-                                crate::branding::APP_NAME,
-                                &format!("{name}: {}", progress.message),
-                                true,
-                            );
-                            app.refresh_library(cx);
-                        }
-                        cx.notify();
-                        true
-                    }
-                    Err(err) => {
-                        app.compact_busy = false;
-                        app.live.set_compact_busy(false);
-                        app.compact_progress = None;
-                        app.show_error_toast(err.clone(), cx);
-                        notify_compact(
-                            app.system_tray.as_ref(),
-                            app.settings.os_notify_mode,
-                            app.window_hidden_to_tray,
-                            crate::branding::APP_NAME,
-                            &format!("{name}: {err}"),
-                            false,
-                        );
-                        cx.notify();
-                        false
-                    }
-                });
-                if !matches!(cont, Ok(true)) {
-                    break;
-                }
-            }
-        })
-        .detach();
     }
 
     pub(crate) fn flush_state_now(&mut self) {
@@ -611,9 +542,9 @@ impl LibraryApp {
         let paused = self.live.toggle_paused();
         self.show_toast(
             if paused {
-                "Live Compact paused."
+                "Paused live."
             } else {
-                "Live Compact resumed."
+                "Resumed live."
             },
             cx,
         );
@@ -630,7 +561,7 @@ impl LibraryApp {
         self.compact_progress = Some(CompactProgress {
             processed: 0,
             total: 1,
-            message: "Recompacting last patch…".into(),
+            message: "Retrying last patch…".into(),
         });
         cx.notify();
         let live = self.live.clone();

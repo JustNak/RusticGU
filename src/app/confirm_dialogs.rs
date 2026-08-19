@@ -72,7 +72,7 @@ impl LibraryApp {
     ) {
         window.open_dialog(cx, move |dialog, _window, cx| {
             let theme = cx.theme().clone();
-            dialog.title(format!("Estimate — {name}")).alert().child(
+            dialog.title(format!("Check — {name}")).alert().child(
                 v_flex()
                     .gap_2()
                     .max_w(px(420.))

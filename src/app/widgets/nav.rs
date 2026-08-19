@@ -68,11 +68,15 @@ pub(crate) fn nav_item(
         .on_click(cx.listener(move |this, _, window, cx| {
             this.select_filter(filter, window, cx);
         }))
-        .child(
-            Icon::new(filter.nav_icon())
+        .child(match filter.nav_icon_path() {
+            Some(path) => Icon::empty()
+                .path(path)
                 .with_size(px(15.))
                 .text_color(icon_color),
-        )
+            None => Icon::new(filter.nav_icon())
+                .with_size(px(15.))
+                .text_color(icon_color),
+        })
         .child(
             div()
                 .flex_1()

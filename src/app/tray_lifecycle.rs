@@ -72,6 +72,8 @@ impl LibraryApp {
         }
     }
 
+    /// Full quit. Used by the flyout footer Exit button (QA FAIL #3) and by
+    /// the tray-menu exit command — not tray-menu only.
     pub(crate) fn force_quit_app(&mut self, cx: &mut Context<Self>) {
         self.force_quit = true;
         self.flush_window_layout_now();
@@ -101,8 +103,9 @@ impl LibraryApp {
                 cx.notify();
             }
             TrayEvent::ToggleFlyout => {
-                self.pending_toggle_flyout = true;
-                cx.notify();
+                // Open from the event, never from Render — a nested open_window
+                // during LibraryApp::render leaves an empty frameless HWND.
+                self.toggle_flyout(cx);
             }
             TrayEvent::Exit => {
                 self.force_quit_app(cx);
@@ -145,8 +148,12 @@ impl LibraryApp {
             show_main_window(window);
         }
         if self.pending_toggle_flyout {
+            // Legacy flag: opening a window from Render is the empty-flyout bug.
             self.pending_toggle_flyout = false;
-            self.toggle_flyout(window, cx);
+        }
+        if self.pending_open_compact {
+            self.pending_open_compact = false;
+            self.open_compact_level_dialog(window, cx);
         }
     }
 }

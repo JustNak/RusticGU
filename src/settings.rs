@@ -76,12 +76,12 @@ pub enum AppTheme {
 pub enum AccentPreset {
     Default,
     Blue,
+    #[default]
     Cyan,
     Emerald,
     Amber,
     Rose,
     Violet,
-    #[default]
     Orange,
     Slate,
     Custom,
@@ -232,15 +232,15 @@ pub const MAX_NOISE_INTENSITY: u8 = 100;
 pub const MAX_VIGNETTE_INTENSITY: u8 = 100;
 
 fn default_accent_hue() -> f32 {
-    28.0
+    186.0
 }
 
 fn default_accent_saturation() -> f32 {
-    90.0
+    78.0
 }
 
 fn default_accent_lightness() -> f32 {
-    55.0
+    52.0
 }
 
 fn default_true() -> bool {
@@ -404,7 +404,7 @@ impl Default for Settings {
         Self {
             update_channel: UpdateChannel::Stable,
             theme: AppTheme::Dark,
-            accent_preset: AccentPreset::Orange,
+            accent_preset: AccentPreset::Cyan,
             accent_hue: default_accent_hue(),
             accent_saturation: default_accent_saturation(),
             accent_lightness: default_accent_lightness(),
@@ -491,7 +491,8 @@ mod tests {
     fn defaults_are_dark_and_xpress8k() {
         let s = Settings::default();
         assert_eq!(s.theme, AppTheme::Dark);
-        assert_eq!(s.accent_preset, AccentPreset::Orange);
+        assert_eq!(s.accent_preset, AccentPreset::Cyan);
+        assert!((s.accent_hue - 186.0).abs() < f32::EPSILON);
         assert!(!s.include_xbox_games);
         assert_eq!(s.compact_algorithm, CompactAlgorithm::Xpress8k);
         assert_eq!(s.compact_algorithm.exe_flag(), "XPRESS8K");

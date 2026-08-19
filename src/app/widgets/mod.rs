@@ -6,7 +6,7 @@ mod path;
 mod progress;
 mod settings;
 
-pub(crate) use chrome::{empty_state_badge, render_vignette_overlay};
+pub(crate) use chrome::render_vignette_overlay;
 pub(crate) use nav::{nav_item, settings_nav_item};
 pub(crate) use progress::styled_progress;
 pub(crate) use settings::{

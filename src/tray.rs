@@ -59,6 +59,50 @@ pub fn truncate_utf16_units(s: &str, max_units: usize) -> &str {
     &s[..end]
 }
 
+/// Screen-pixel rectangle of the tray icon (or the cursor as a fallback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrayIconAnchor {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Convert a `Shell_NotifyIconGetRect` screen RECT into an icon anchor.
+///
+/// QA FAIL #2: placement must use this notify-icon rect, not a hardcoded
+/// display corner (`width-348`, `height-320`).
+pub fn anchor_from_notify_rect(
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+) -> Option<TrayIconAnchor> {
+    let width = right - left;
+    let height = bottom - top;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some(TrayIconAnchor {
+        x: left,
+        y: top,
+        width,
+        height,
+    })
+}
+
+/// Cursor position as a 16×16 anchor when the icon rect is unavailable.
+pub fn cursor_anchor() -> Option<TrayIconAnchor> {
+    #[cfg(windows)]
+    {
+        windows_impl::cursor_anchor()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
 /// RAII handle for the background tray icon. Dropping it removes the icon.
 pub struct SystemTray {
     #[cfg(windows)]
@@ -82,6 +126,18 @@ impl SystemTray {
         #[cfg(not(windows))]
         {
             let _ = event_tx;
+            None
+        }
+    }
+
+    /// Tray-icon rectangle in screen pixels, or the cursor if the icon is hidden.
+    pub fn icon_anchor(&self) -> Option<TrayIconAnchor> {
+        #[cfg(windows)]
+        {
+            windows_impl::icon_anchor(self.hwnd.load(std::sync::atomic::Ordering::SeqCst))
+        }
+        #[cfg(not(windows))]
+        {
             None
         }
     }
@@ -254,10 +310,10 @@ mod windows_impl {
     use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Shell::{
-        Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_ERROR, NIIF_INFO,
-        NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION, NIN_BALLOONTIMEOUT,
-        NIN_BALLOONUSERCLICK, NOTIFYICONDATAW, NOTIFYICONDATAW_0, NOTIFYICON_VERSION,
-        NOTIFY_ICON_INFOTIP_FLAGS,
+        Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP,
+        NIIF_ERROR, NIIF_INFO, NIIF_WARNING, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
+        NIN_BALLOONTIMEOUT, NIN_BALLOONUSERCLICK, NOTIFYICONDATAW, NOTIFYICONDATAW_0,
+        NOTIFYICONIDENTIFIER, NOTIFYICON_VERSION, NOTIFY_ICON_INFOTIP_FLAGS,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyMenu,
@@ -723,11 +779,44 @@ mod windows_impl {
     fn wide_null(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
+
+    pub(super) fn icon_anchor(hwnd_raw: isize) -> Option<super::TrayIconAnchor> {
+        if hwnd_raw != 0 {
+            let ident = NOTIFYICONIDENTIFIER {
+                cbSize: std::mem::size_of::<NOTIFYICONIDENTIFIER>() as u32,
+                hWnd: HWND(hwnd_raw as *mut core::ffi::c_void),
+                uID: TRAY_UID,
+                guidItem: Default::default(),
+            };
+            if let Ok(rect) = unsafe { Shell_NotifyIconGetRect(&ident) } {
+                if let Some(anchor) =
+                    super::anchor_from_notify_rect(rect.left, rect.top, rect.right, rect.bottom)
+                {
+                    return Some(anchor);
+                }
+            }
+        }
+        cursor_anchor()
+    }
+
+    pub(super) fn cursor_anchor() -> Option<super::TrayIconAnchor> {
+        let mut pt = windows::Win32::Foundation::POINT::default();
+        unsafe { GetCursorPos(&mut pt) }.ok()?;
+        Some(super::TrayIconAnchor {
+            x: pt.x,
+            y: pt.y,
+            width: 16,
+            height: 16,
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{truncate_utf16_units, BALLOON_BODY_MAX_UTF16, BALLOON_TITLE_MAX_UTF16};
+    use super::{
+        anchor_from_notify_rect, truncate_utf16_units, BALLOON_BODY_MAX_UTF16,
+        BALLOON_TITLE_MAX_UTF16,
+    };
 
     #[test]
     fn truncate_short_unchanged() {
@@ -764,5 +853,16 @@ mod tests {
     #[test]
     fn truncate_zero_is_empty() {
         assert_eq!(truncate_utf16_units("abc", 0), "");
+    }
+
+    #[test]
+    fn notify_icon_rect_becomes_anchor() {
+        // Shell_NotifyIconGetRect → (left, top, right, bottom) in screen pixels.
+        let anchor = anchor_from_notify_rect(1860, 1048, 1884, 1072).expect("valid icon rect");
+        assert_eq!(anchor.x, 1860);
+        assert_eq!(anchor.y, 1048);
+        assert_eq!(anchor.width, 24);
+        assert_eq!(anchor.height, 24);
+        assert!(anchor_from_notify_rect(10, 10, 10, 20).is_none());
     }
 }

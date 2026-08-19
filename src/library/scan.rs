@@ -7,7 +7,7 @@ use stores::EmptyHive;
 use stores::{discover_all, DiscoverOptions, DiscoveredTitle, PathRoots, StdFs, StoreId};
 
 use super::steam::{scan_steam_library, steam_path, SteamGame};
-use super::title::{LibraryStore, LibraryTitle};
+use super::title::LibraryTitle;
 use shelf::last_played_unix_from_steam_userdata;
 
 /// Typical XboxGames library folders. Never a volume root, never WindowsApps.
@@ -123,6 +123,7 @@ pub fn scan_library(include_xbox_games: bool) -> Result<Vec<LibraryTitle>, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::library::LibraryStore;
     use std::path::PathBuf;
     use stores::DiscoveredTitle;
 

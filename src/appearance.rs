@@ -270,6 +270,7 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
 
     {
         let theme = Theme::global_mut(cx);
+        apply_cinematic_surfaces(theme);
         apply_accent(theme, &settings);
         apply_shape_and_density(theme, &settings);
         // On Windows, layered alpha handles translucency — keep surfaces solid.
@@ -285,6 +286,20 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
         apply_window_opacity(window, settings.window_transparency, settings.backdrop_blur);
         window.refresh();
     }
+}
+
+/// Deep teal-black surfaces so the default dark theme is not generic gray / DL chrome.
+fn apply_cinematic_surfaces(theme: &mut Theme) {
+    if !theme.is_dark() {
+        return;
+    }
+    theme.background = hsla(0.53, 0.20, 0.055, 1.0);
+    theme.title_bar = hsla(0.53, 0.16, 0.072, 1.0);
+    theme.sidebar = hsla(0.53, 0.15, 0.068, 1.0);
+    theme.muted = hsla(0.53, 0.10, 0.12, 1.0);
+    theme.secondary = hsla(0.53, 0.12, 0.11, 1.0);
+    theme.list = hsla(0.53, 0.14, 0.07, 1.0);
+    theme.popover = hsla(0.53, 0.14, 0.09, 1.0);
 }
 
 /// Whether the noise overlay should paint at this intensity.
@@ -427,10 +442,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_accent_is_orange() {
+    fn default_accent_is_cinematic_cyan() {
         let s = Settings::default();
-        assert_eq!(s.accent_preset, AccentPreset::Orange);
-        assert!(resolve_accent_color(&s, true).is_some());
+        assert_eq!(s.accent_preset, AccentPreset::Cyan);
+        assert_ne!(s.accent_preset, AccentPreset::Orange);
+        let c = resolve_accent_color(&s, true).expect("Cyan preset resolves");
+        // Cyan / teal band — not RusticDL orange (~28°).
+        assert!(
+            c.h > 0.45 && c.h < 0.62,
+            "expected cinematic cyan/teal hue, got h={}",
+            c.h
+        );
     }
 
     #[test]

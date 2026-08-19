@@ -162,7 +162,7 @@ impl LibraryApp {
                                 Button::new("title-refresh-library")
                                     .ghost()
                                     .icon(Icon::empty().path("icons/rotate-cw.svg"))
-                                    .tooltip("Rescan Steam library")
+                                    .tooltip("Refresh")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.refresh_library(cx);
                                     })),

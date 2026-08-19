@@ -123,11 +123,17 @@ mod tests {
         for path in [
             "icons/inbox.svg",
             "icons/arrow-down.svg",
+            "icons/arrow-up.svg",
             "icons/circle-check.svg",
             "icons/circle-x.svg",
             "icons/settings.svg",
             "icons/plus.svg",
             "icons/empty-box.svg",
+            "icons/file-archive.svg",
+            "icons/play.svg",
+            "icons/undo-2.svg",
+            "icons/rotate-cw.svg",
+            "icons/info.svg",
         ] {
             let bytes = Assets::load_embedded(path)
                 .unwrap_or_else(|| panic!("missing embedded asset: {path}"));
