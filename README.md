@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="assets/brand/logo-light.png">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/logo.png">
+    <img src="assets/brand/logo.png" alt="RusticGU logo" width="128" height="128">
+  </picture>
+</p>
+
 # RusticGU
 
 RusticGU is a Windows game-library compact tool. It uses transparent WOF `compact /EXE` so titles stay playable — not NTFS LZNT1, not a rewriter, not WindowsApps, and with **no savings-percentage promise**.
