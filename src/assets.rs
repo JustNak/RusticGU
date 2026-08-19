@@ -15,9 +15,9 @@ static EMBEDDED_LOGO_LIGHT: &[u8] = include_bytes!("../assets/brand/logo-light.p
 /// Loads SVG/icons and other static files from the project `assets/` directory.
 ///
 /// Resolution order:
-/// 1. `<exe-dir>/assets/` — release installs (cargo-packager copies `assets`)
-/// 2. `CARGO_MANIFEST_DIR/assets` — local `cargo run` / `cargo build` from the repo
-/// 3. Compile-time embedded icons + title-bar logos — always available as a fallback
+/// 1. `<exe-dir>/assets/`: release installs (cargo-packager copies `assets`)
+/// 2. `CARGO_MANIFEST_DIR/assets`: local `cargo run` / `cargo build` from the repo
+/// 3. Compile-time embedded icons + title-bar logos, which are always available as a fallback
 pub struct Assets {
     base: PathBuf,
 }

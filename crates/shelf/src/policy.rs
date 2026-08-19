@@ -7,11 +7,11 @@ use crate::thresholds::{Recency, ShelfConfig};
 /// Recommended NTFS/WOF algorithm (or an exclusion).
 ///
 /// Maps to `compact.exe` / WOF:
-/// - [`CompactPolicy::Lzx`] — `/EXE:LZX` (cold shelf)
-/// - [`CompactPolicy::Xpress8k`] — `/EXE:XPRESS8K` (recently played)
-/// - [`CompactPolicy::Xpress`] — `/EXE:XPRESS` walk-back when launching a
+/// - [`CompactPolicy::Lzx`]: `/EXE:LZX` (cold shelf)
+/// - [`CompactPolicy::Xpress8k`]: `/EXE:XPRESS8K` (recently played)
+/// - [`CompactPolicy::Xpress`]: `/EXE:XPRESS` walk-back when launching a
 ///   previously LZX-shelved title (lighter, faster to page in)
-/// - [`CompactPolicy::Exclude`] — do not recommend any compact
+/// - [`CompactPolicy::Exclude`]: do not recommend any compact
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactPolicy {
     Lzx,

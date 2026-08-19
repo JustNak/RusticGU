@@ -22,7 +22,7 @@ struct EpicManifest {
 }
 
 /// Parse Epic Games Launcher `*.item` / `*.json` manifests in `Manifests`.
-/// Does not walk volumes — only the official manifest directory.
+/// Does not walk volumes. It only reads the official manifest directory.
 pub fn discover(
     fs: &impl IndexFs,
     manifests_dir: &Path,

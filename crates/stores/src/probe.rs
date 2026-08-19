@@ -10,7 +10,7 @@ use crate::{battlenet, ea, epic, gog, itch, riot, ubisoft, xbox};
 /// 1. Epic Manifests  
 /// 2. GOG HKLM Games  
 /// 3. EA, Ubisoft, Riot, Battle.net, itch (each via its own index)  
-/// 4. XboxGames / GDK — only when `opts.include_xbox_games` is true
+/// 4. XboxGames / GDK, and only when `opts.include_xbox_games` is true
 ///
 /// Missing launchers produce an empty contribution, not a hard error.
 /// Dual-registered titles may appear twice (no cross-store dedupe).

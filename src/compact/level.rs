@@ -87,7 +87,7 @@ impl CompactLevel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompactApplyDecision {
     Apply,
-    /// DirectStorage present and override is off — warn and skip this title.
+    /// DirectStorage present and override is off: warn and skip this title.
     SkipDirectStorage,
     Refuse(String),
 }
@@ -275,7 +275,7 @@ mod tests {
             "apply must still see dstorage: {err}"
         );
 
-        // Override still allowed — decision becomes Apply (may fail later on non-NTFS CI).
+        // Override still allowed: decision becomes Apply (may fail later on non-NTFS CI).
         match decide_compact_apply(&root, true) {
             CompactApplyDecision::Apply | CompactApplyDecision::Refuse(_) => {}
             CompactApplyDecision::SkipDirectStorage => {

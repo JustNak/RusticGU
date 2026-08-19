@@ -1,7 +1,7 @@
 //! Compression policy for the "shelf".
 //!
 //! - Cold / **unknown last-played** (`None`) → **LZX** (conservative; never
-//!   fabricate a timestamp — see [`last_played`])
+//!   fabricate a timestamp; see [`last_played`])
 //! - Recently played titles stay **XPRESS8K**
 //! - Launching a shelved (LZX) title walks back to **XPRESS**
 //! - Confirmed self-rewriters (GW2, Secret World Legends, LOTRO) are

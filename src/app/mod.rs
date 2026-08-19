@@ -679,7 +679,7 @@ impl LibraryApp {
                         app.live.set_compact_busy(false);
                         app.compact_progress = None;
                         if let Err(msg) = open_title(&launch_game) {
-                            app.show_error_toast(format!("{err} — {msg}"), cx);
+                            app.show_error_toast(format!("{err}: {msg}"), cx);
                         } else {
                             app.show_error_toast(err, cx);
                         }

@@ -15,7 +15,7 @@ use crate::library::{LibraryStore, LibraryTitle};
 
 /// Modern hashed / unhashed Steam portrait host.
 pub const STEAM_CDN_SHARED: &str = "https://shared.steamstatic.com/store_item_assets/steam/apps";
-/// Legacy hosts — many 2025–26 titles 404 here without a hash. Tried last.
+/// Legacy hosts: many 2025–26 titles 404 here without a hash. Tried last.
 pub const STEAM_CDN_LEGACY_CLOUDFLARE: &str = "https://cdn.cloudflare.steamstatic.com/steam/apps";
 pub const STEAM_CDN_LEGACY_AKAMAI: &str = "https://steamcdn-a.akamaihd.net/steam/apps";
 

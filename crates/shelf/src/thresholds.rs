@@ -31,7 +31,7 @@ impl ShelfConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Recency {
     Recent,
-    /// Between recent and cold — keep XPRESS8K, do not shelf yet.
+    /// Between recent and cold: keep XPRESS8K, do not shelf yet.
     Warm,
     Cold,
 }

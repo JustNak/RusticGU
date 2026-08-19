@@ -649,7 +649,7 @@ fn flow_hint(phase: CompactFlowPhase, failed: bool) -> &'static str {
             "Click anywhere to return to the library."
         }
         CompactFlowPhase::Done | CompactFlowPhase::Leaving => {
-            "Click anywhere — or any button — to return."
+            "Click anywhere or any button to return."
         }
     }
 }

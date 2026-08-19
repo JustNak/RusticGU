@@ -1,10 +1,10 @@
-//! RusticGU Updater — dedicated process that applies an update and relaunches the app.
+//! RusticGU Updater: dedicated process that applies an update and relaunches the app.
 //!
 //! Invoked by the main app after the user clicks Update:
 //! 1. Show a small progress window.
 //! 2. Wait for the main process to exit.
 //! 3. Download the NSIS setup (or use a local path).
-//! 4. Run the installer silently (`/S`, no `/R` — we own relaunch).
+//! 4. Run the installer silently (`/S`, no `/R`; we own relaunch).
 //! 5. Start RusticGU again and exit.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -71,7 +71,7 @@ fn main() {
             let release = args.release_page.as_deref();
             ui::show_error_message("RusticGU Updater", &message, release);
             // Best-effort: leave the user with a running app when the main
-            // process already exited for the update. Skip WaitTimeout — the
+            // process already exited for the update. Skip WaitTimeout: the
             // original app is still alive in that case.
             if matches!(
                 outcome,

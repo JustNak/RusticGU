@@ -265,7 +265,7 @@ fn render_poster_card(
     let id = game.id.clone();
     let size = format_size_pair(game.logical_bytes, game.on_disk_bytes);
     let path = game.install_path.display().to_string();
-    let tip = format!("{} — {size} — {path}", game.name);
+    let tip = format!("{}: {size} ({path})", game.name);
     let has_art = cover.is_some();
     let monogram = Monogram::from_title(&game);
     let badge = game.store.badge();

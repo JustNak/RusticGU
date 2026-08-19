@@ -18,7 +18,7 @@ pub fn run_silent_installer(path: &Path, progress: &dyn ProgressSink) -> Result<
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // Keep the console hidden; do not detach — we need to wait for completion.
+        // Keep the console hidden; do not detach, because we need to wait for completion.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         const ERROR_ELEVATION_REQUIRED: i32 = 740;
 

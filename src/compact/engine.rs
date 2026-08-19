@@ -515,7 +515,7 @@ fn apply_wof(
             progress(CompactProgress {
                 processed,
                 total,
-                message: "Access denied — retrying elevated…".into(),
+                message: "Access denied. Retrying elevated…".into(),
             });
             elevate = true;
             output = run_compact(inv, true)?;

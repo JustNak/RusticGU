@@ -213,7 +213,7 @@ Function PageReinstall
 
   ; Silent (/S) self-updates skip this maintenance UI and overwrite in place
   ; (leave is not run when we Abort). Passive uses SkipIfPassive below.
-  ; IfSilent takes jump targets — not an instruction name — so use a relative skip.
+  ; IfSilent takes jump targets, not an instruction name, so use a relative skip.
   IfSilent 0 reinstall_page_not_silent
     Abort
   reinstall_page_not_silent:

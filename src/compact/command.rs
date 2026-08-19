@@ -36,7 +36,7 @@ impl CompactInvocation {
 /// Build a WOF compact / uncompact command for one path (file or explicit target).
 ///
 /// Always includes `/EXE` (and an algorithm on compress). Never emits LZNT1.
-/// Never adds recursive `/S` — apply uses [`build_apply_invocations`] instead.
+/// Never adds recursive `/S`. Apply uses [`build_apply_invocations`] instead.
 pub fn build_compact_command(
     op: CompactOp,
     target: &Path,

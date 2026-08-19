@@ -1,13 +1,13 @@
 //! Compact Proton-style tray panel: header + one primary + list + footer.
 //!
-//! QA FAIL #1 — chrome-less: `WindowKind::PopUp`, `titlebar: None`. Do not import
+//! QA FAIL #1: chrome-less. Use `WindowKind::PopUp`, `titlebar: None`. Do not import
 //! or apply client title-bar options. The panel paints its own header.
-//! QA FAIL #2 — place from `Shell_NotifyIconGetRect` + work area (see
+//! QA FAIL #2: place from `Shell_NotifyIconGetRect` + work area (see
 //! `window_placement` / `tray::anchor_from_notify_rect`).
-//! QA FAIL #3 — footer **Open RusticGU** + **Exit** on the panel; Exit calls
+//! QA FAIL #3: footer **Open RusticGU** + **Exit** on the panel; Exit calls
 //! `force_quit_app` (not tray-menu `ID_TRAY_EXIT` only).
 //!
-//! Do not wrap in `gpui_component::Root` — Root's `window_border` paints a
+//! Do not wrap in `gpui_component::Root`. Root's `window_border` paints a
 //! transparent backdrop. Open from the tray event (never `LibraryApp::render`).
 
 use std::time::Instant;
@@ -69,7 +69,7 @@ impl TrayFlyout {
 
 impl gpui::Render for TrayFlyout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Never inherit the main window's layered glass — this panel must be solid.
+        // Never inherit the main window's layered glass. This panel must be solid.
         window.set_background_appearance(WindowBackgroundAppearance::Opaque);
         apply_window_opacity(window, 0, false);
 
@@ -278,7 +278,7 @@ pub(crate) enum FlyoutFooterItem {
     Exit,
 }
 
-/// What the footer Exit button does — full process quit, same as `ID_TRAY_EXIT`.
+/// What the footer Exit button does: full process quit, same as `ID_TRAY_EXIT`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FlyoutExitCommand {
     ForceQuit,

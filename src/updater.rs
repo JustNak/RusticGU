@@ -1,8 +1,8 @@
 //! Auto-updater backed by GitHub Releases.
 //!
 //! Channel selection (`UpdateChannel`):
-//! - **Stable** — `GET …/releases/latest` (GitHub’s latest non-prerelease).
-//! - **Nightly** — list releases and pick the newest published `vX.Y.Z-nightly.*`
+//! - **Stable:** `GET …/releases/latest` (GitHub’s latest non-prerelease).
+//! - **Nightly:** list releases and pick the newest published `vX.Y.Z-nightly.*`
 //!   pre-release that includes the setup installer.
 //!
 //! Staged flow (main app UI in `update_flow`):
@@ -514,7 +514,7 @@ fn shell_execute_detached(exe: &std::path::Path, args: &[String]) -> Result<(), 
         ));
     }
 
-    // Detach immediately — do not wait for the update to finish.
+    // Detach immediately; do not wait for the update to finish.
     if !info.hProcess.is_invalid() {
         unsafe {
             let _ = CloseHandle(info.hProcess);

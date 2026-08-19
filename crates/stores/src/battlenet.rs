@@ -6,7 +6,7 @@ use crate::error::{StoreError, StoreWarning};
 use crate::fs::IndexFs;
 use crate::model::{DiscoveredTitle, StoreId};
 
-/// Agent / Battle.net app — not games. Skip `agent` and `bna` only
+/// Agent / Battle.net app, not games. Skip `agent` and `bna` only
 /// (plus the `battle.net` alias of `bna`).
 const NOT_GAMES: &[&str] = &["agent", "bna", "battle.net"];
 

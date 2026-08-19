@@ -1,7 +1,7 @@
 //! Minimal named-pipe activate server (show-window only).
 //!
 //! Second launches ask the primary instance to restore its window. This is not
-//! a general IPC protocol — native-host / extension traffic is out of scope.
+//! a general IPC protocol. Native-host / extension traffic is out of scope.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
