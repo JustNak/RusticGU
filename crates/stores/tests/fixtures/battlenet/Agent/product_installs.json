@@ -1,0 +1,28 @@
+{
+  "product_installs": [
+    {
+      "uid": "wow",
+      "product_code": "wow",
+      "settings": { "install_path": "C:\\World of Warcraft" },
+      "cached_product_state": {
+        "base_product_state": { "installed": true, "playable": true }
+      }
+    },
+    {
+      "uid": "agent",
+      "product_code": "agent",
+      "settings": { "install_path": "C:\\ProgramData\\Battle.net\\Agent" },
+      "cached_product_state": {
+        "base_product_state": { "installed": true, "playable": true }
+      }
+    },
+    {
+      "uid": "bna",
+      "product_code": "bna",
+      "settings": { "install_path": "C:\\Program Files (x86)\\Battle.net" },
+      "cached_product_state": {
+        "base_product_state": { "installed": true, "playable": true }
+      }
+    }
+  ]
+}

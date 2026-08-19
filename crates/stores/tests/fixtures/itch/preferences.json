@@ -1,0 +1,6 @@
+{
+  "installLocations": {
+    "appdata": { "path": "ITCH_APPS" }
+  },
+  "defaultInstallLocation": "appdata"
+}

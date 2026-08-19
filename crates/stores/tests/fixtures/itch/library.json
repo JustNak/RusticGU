@@ -1,0 +1,9 @@
+{
+  "caves": [
+    {
+      "id": "cave-celeste",
+      "game": { "title": "Celeste", "id": 191125 },
+      "installFolder": "ITCH_APPS/Celeste"
+    }
+  ]
+}
