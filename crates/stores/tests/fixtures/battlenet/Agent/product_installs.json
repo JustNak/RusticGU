@@ -1,0 +1,16 @@
+{
+  "product_installs": [
+    {
+      "uid": "wow",
+      "productCode": "wow",
+      "installPath": "C:\\World of Warcraft",
+      "title": "World of Warcraft"
+    },
+    {
+      "uid": "agent",
+      "productCode": "agent",
+      "installPath": "C:\\ProgramData\\Battle.net\\Agent",
+      "title": "Battle.net Agent"
+    }
+  ]
+}

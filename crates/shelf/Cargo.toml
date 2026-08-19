@@ -1,0 +1,12 @@
+[package]
+name = "shelf"
+version = "0.1.0"
+edition = "2021"
+description = "Compression policy for cold/recent/launching titles, with a self-rewriter denylist."
+license = "MIT"
+publish = false
+
+[dependencies]
+thiserror = "1"
+
+[dev-dependencies]

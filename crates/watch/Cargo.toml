@@ -1,0 +1,12 @@
+[package]
+name = "watch"
+version = "0.1.0"
+edition = "2021"
+description = "Live Compact watcher: poll Steam ACF/download state and decide when to lock or incrementally recompact."
+license = "MIT"
+publish = false
+
+[dependencies]
+thiserror = "1"
+
+[dev-dependencies]
