@@ -1,29 +1,48 @@
-//! Compact tray flyout: a real painted panel, not an empty popup window.
+//! Compact Proton-style tray panel: header + one primary + list + footer.
 //!
-//! gpui 0.2.2 `WindowKind::PopUp` on Windows is a tool window with no chrome.
-//! We do **not** wrap this in `gpui_component::Root` — Root's `window_border`
-//! paints a transparent backdrop and reads as an empty frameless HWND.
+//! No title-bar chrome (`titlebar: None`, no `Root` / `TitleBar`). Root's
+//! `window_border` paints a transparent backdrop and reads as an empty HWND.
 //! Open from the tray event (never from `LibraryApp::render`).
 
 use std::time::Instant;
 
 use gpui::{
-    div, prelude::FluentBuilder, px, size, AppContext, Context, InteractiveElement, IntoElement,
-    ParentElement, SharedString, Styled, Window, WindowBackgroundAppearance, WindowBounds,
-    WindowDecorations, WindowKind, WindowOptions,
+    div, hsla, img, prelude::FluentBuilder, px, size, AppContext, Bounds, Context,
+    InteractiveElement, IntoElement, ObjectFit, ParentElement, SharedString, Size, Styled,
+    StyledImage, Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, StyledExt,
+    h_flex, v_flex, ActiveTheme, Disableable, Icon, StyledExt,
 };
 
 use super::LibraryApp;
 use crate::appearance::apply_window_opacity;
-use crate::branding::APP_NAME;
+use crate::branding::{APP_LOGO_DARK, APP_NAME};
 use crate::library::LibraryTitle;
 use crate::window_placement::{
     place_flyout_above_tray, FLYOUT_HEIGHT_PX, FLYOUT_TASKBAR_CLEARANCE_PX, FLYOUT_WIDTH_PX,
 };
+
+/// Always-dark panel tokens (Proton-style). Never inherit the main title bar.
+fn panel_bg() -> gpui::Hsla {
+    hsla(0.53, 0.16, 0.075, 1.0)
+}
+fn panel_border() -> gpui::Hsla {
+    hsla(0.53, 0.10, 0.20, 1.0)
+}
+fn panel_fg() -> gpui::Hsla {
+    hsla(0.53, 0.04, 0.94, 1.0)
+}
+fn panel_muted() -> gpui::Hsla {
+    hsla(0.53, 0.08, 0.62, 1.0)
+}
+fn panel_row() -> gpui::Hsla {
+    hsla(0.53, 0.12, 0.11, 1.0)
+}
+fn panel_live() -> gpui::Hsla {
+    hsla(0.50, 0.55, 0.52, 1.0)
+}
 
 const FLYOUT_W: f32 = FLYOUT_WIDTH_PX as f32;
 const FLYOUT_H: f32 = FLYOUT_HEIGHT_PX as f32;
@@ -51,32 +70,47 @@ impl gpui::Render for TrayFlyout {
         let theme = cx.theme().clone();
         let snapshot = self.app.read(cx).flyout_snapshot();
         let app = self.app.clone();
-        let panel = theme.popover;
-        let muted = theme.muted_foreground;
-        let fg = theme.foreground;
+        let fg = panel_fg();
+        let muted = panel_muted();
+        let live = if theme.is_dark() {
+            theme.primary
+        } else {
+            panel_live()
+        };
 
         div()
             .id("tray-flyout")
             .size_full()
             .flex()
             .flex_col()
-            .bg(panel)
+            .bg(panel_bg())
             .text_color(fg)
             .border_1()
-            .border_color(theme.border)
+            .border_color(panel_border())
             .rounded(px(12.))
             .p_3()
             .child(
                 v_flex()
                     .id("tray-flyout-body")
                     .size_full()
-                    .gap_3()
-                    .child(render_header(&snapshot, theme.primary, fg, muted))
+                    .gap_2()
+                    .child(render_header(&snapshot, live, fg, muted))
+                    .child(section_rule())
                     .child(render_primary(&snapshot, app.clone()))
-                    .child(render_list(&snapshot, app.clone(), &theme, fg, muted))
-                    .child(render_footer(app)),
+                    .child(section_rule())
+                    .child(render_list(&snapshot, app.clone(), fg, muted))
+                    .child(section_rule())
+                    .child(render_footer(app, muted)),
             )
     }
+}
+
+fn section_rule() -> impl IntoElement {
+    div()
+        .id("tray-flyout-rule")
+        .w_full()
+        .h(px(1.))
+        .bg(panel_border())
 }
 
 fn render_header(
@@ -90,11 +124,23 @@ fn render_header(
         .w_full()
         .gap_1()
         .child(
-            div()
-                .text_sm()
-                .font_semibold()
-                .text_color(fg)
-                .child(APP_NAME),
+            h_flex()
+                .id("tray-flyout-brand")
+                .items_center()
+                .gap_2()
+                .child(
+                    img(APP_LOGO_DARK)
+                        .w(px(20.))
+                        .h(px(20.))
+                        .object_fit(ObjectFit::Contain),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_semibold()
+                        .text_color(fg)
+                        .child(APP_NAME),
+                ),
         )
         .child(div().text_xs().text_color(muted).child(format!(
             "{} compact · {} inflated",
@@ -163,7 +209,6 @@ fn render_primary(snapshot: &FlyoutSnapshot, app: gpui::Entity<LibraryApp>) -> i
 fn render_list(
     snapshot: &FlyoutSnapshot,
     app: gpui::Entity<LibraryApp>,
-    theme: &gpui_component::Theme,
     fg: gpui::Hsla,
     muted: gpui::Hsla,
 ) -> impl IntoElement {
@@ -189,8 +234,8 @@ fn render_list(
                 .gap_2()
                 .px_2()
                 .py_1()
-                .rounded(theme.radius)
-                .bg(theme.secondary.opacity(0.45))
+                .rounded(px(8.))
+                .bg(panel_row())
                 .child(
                     v_flex()
                         .min_w_0()
@@ -205,7 +250,7 @@ fn render_list(
                         Button::new("flyout-retry-last")
                             .ghost()
                             .compact()
-                            .icon(IconName::Redo2)
+                            .icon(Icon::empty().path("icons/redo-2.svg"))
                             .label("Retry last")
                             .disabled(busy)
                             .on_click(move |_, _, cx| {
@@ -219,7 +264,7 @@ fn render_list(
         }))
 }
 
-fn render_footer(app: gpui::Entity<LibraryApp>) -> impl IntoElement {
+fn render_footer(app: gpui::Entity<LibraryApp>, muted: gpui::Hsla) -> impl IntoElement {
     h_flex()
         .id("tray-flyout-footer")
         .w_full()
@@ -230,7 +275,8 @@ fn render_footer(app: gpui::Entity<LibraryApp>) -> impl IntoElement {
             Button::new("flyout-open-main")
                 .ghost()
                 .compact()
-                .icon(IconName::ExternalLink)
+                .text_color(muted)
+                .icon(Icon::empty().path("icons/external-link.svg"))
                 .label("Open RusticGU")
                 .on_click({
                     let app = app.clone();
@@ -245,7 +291,8 @@ fn render_footer(app: gpui::Entity<LibraryApp>) -> impl IntoElement {
             Button::new("flyout-exit")
                 .ghost()
                 .compact()
-                .icon(IconName::WindowClose)
+                .text_color(muted)
+                .icon(Icon::empty().path("icons/window-close.svg"))
                 .label("Exit")
                 .on_click(move |_, _, cx| {
                     app.update(cx, |app, cx| {
@@ -314,56 +361,40 @@ impl LibraryApp {
         let app = cx.entity();
         let size = size(px(FLYOUT_W), px(FLYOUT_H));
         let origin = crate::window_placement::flyout_fallback_origin(cx);
-        let bounds = gpui::Bounds { origin, size };
-        let result = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: None,
-                window_decorations: Some(WindowDecorations::Client),
-                window_background: WindowBackgroundAppearance::Opaque,
-                kind: WindowKind::PopUp,
-                is_movable: false,
-                is_resizable: false,
-                is_minimizable: false,
-                focus: true,
-                show: true,
-                window_min_size: Some(size),
-                ..Default::default()
-            },
-            {
-                let app = app.clone();
-                move |window, cx| {
-                    window.set_background_appearance(WindowBackgroundAppearance::Opaque);
-                    apply_window_opacity(window, 0, false);
-                    let view = cx.new(|_cx| TrayFlyout::new(app.clone()));
-                    window.on_window_should_close(cx, {
-                        let app = app.clone();
-                        move |_, cx| {
-                            app.update(cx, |app, _| {
-                                app.flyout_open = false;
-                                app.flyout_window = None;
-                            });
-                            true
+        let bounds = Bounds { origin, size };
+        let result = cx.open_window(flyout_window_options(bounds, size), {
+            let app = app.clone();
+            move |window, cx| {
+                window.set_background_appearance(WindowBackgroundAppearance::Opaque);
+                apply_window_opacity(window, 0, false);
+                let view = cx.new(|_cx| TrayFlyout::new(app.clone()));
+                window.on_window_should_close(cx, {
+                    let app = app.clone();
+                    move |_, cx| {
+                        app.update(cx, |app, _| {
+                            app.flyout_open = false;
+                            app.flyout_window = None;
+                        });
+                        true
+                    }
+                });
+                view.update(cx, |_, cx| {
+                    cx.observe_window_activation(window, |this, window, cx| {
+                        if window.is_window_active() {
+                            return;
                         }
-                    });
-                    view.update(cx, |_, cx| {
-                        cx.observe_window_activation(window, |this, window, cx| {
-                            if window.is_window_active() {
-                                return;
-                            }
-                            if this.opened_at.elapsed().as_millis() < 250 {
-                                return;
-                            }
-                            this.app.update(cx, |app, cx| {
-                                app.close_flyout(cx);
-                            });
-                        })
-                        .detach();
-                    });
-                    view
-                }
-            },
-        );
+                        if this.opened_at.elapsed().as_millis() < 250 {
+                            return;
+                        }
+                        this.app.update(cx, |app, cx| {
+                            app.close_flyout(cx);
+                        });
+                    })
+                    .detach();
+                });
+                view
+            }
+        });
         match result {
             Ok(handle) => {
                 self.flyout_window = Some(*handle);
@@ -438,6 +469,27 @@ impl LibraryApp {
         if self.main_hwnd != 0 {
             crate::tray::show_main_window_hwnd(self.main_hwnd);
         }
+    }
+}
+
+/// Caption-free popup options. No `TitleBar` / client chrome — Proton panel only.
+pub(crate) fn flyout_window_options(
+    bounds: Bounds<gpui::Pixels>,
+    size: Size<gpui::Pixels>,
+) -> WindowOptions {
+    WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: None,
+        window_decorations: None,
+        window_background: WindowBackgroundAppearance::Opaque,
+        kind: WindowKind::PopUp,
+        is_movable: false,
+        is_resizable: false,
+        is_minimizable: false,
+        focus: true,
+        show: true,
+        window_min_size: Some(size),
+        ..Default::default()
     }
 }
 
@@ -569,5 +621,27 @@ mod tests {
     #[test]
     fn empty_library_has_empty_list() {
         assert!(flyout_list_items(&[], None, 3).is_empty());
+    }
+
+    #[test]
+    fn flyout_window_has_no_titlebar_chrome() {
+        let size = size(px(320.), px(412.));
+        let bounds = Bounds {
+            origin: gpui::point(px(0.), px(0.)),
+            size,
+        };
+        let opts = flyout_window_options(bounds, size);
+        assert!(
+            opts.titlebar.is_none(),
+            "Proton panel must not open a TitleBar popup"
+        );
+        assert!(
+            opts.window_decorations.is_none(),
+            "no client-decorated chrome"
+        );
+        assert_eq!(opts.kind, WindowKind::PopUp);
+        assert!(!opts.is_resizable);
+        assert!(!opts.is_movable);
+        assert_eq!(opts.window_background, WindowBackgroundAppearance::Opaque);
     }
 }

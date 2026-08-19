@@ -11,10 +11,14 @@ use gpui::{point, px, App, Point, Window};
 use crate::tray::TrayIconAnchor;
 
 /// Logical size of the tray flyout panel.
-pub const FLYOUT_WIDTH_PX: i32 = 308;
-pub const FLYOUT_HEIGHT_PX: i32 = 400;
-/// Extra gap above the Windows work-area bottom so the panel clears the taskbar.
-pub const FLYOUT_TASKBAR_CLEARANCE_PX: i32 = 20;
+pub const FLYOUT_WIDTH_PX: i32 = 320;
+pub const FLYOUT_HEIGHT_PX: i32 = 412;
+/// Gap between the panel bottom and the tray-icon top.
+pub const FLYOUT_ICON_GAP_PX: i32 = 12;
+/// Extra inset from `rcWork` so a tall / auto-hide taskbar cannot clip the panel.
+pub const FLYOUT_TASKBAR_CLEARANCE_PX: i32 = 16;
+/// Used when `rcWork == rcMonitor` (auto-hide taskbar) so we still clear ~Win11 height.
+pub const FLYOUT_TYPICAL_TASKBAR_PX: i32 = 48;
 
 /// Pixel step used to stagger stacked capture HUDs so the Nth window is visible.
 pub const CASCADE_STEP_PX: i32 = 36;
@@ -199,35 +203,71 @@ unsafe fn monitor_for_centering(
 pub fn place_flyout_above_tray(
     window: &Window,
     anchor: Option<TrayIconAnchor>,
-    width: i32,
-    height: i32,
+    logical_width: i32,
+    logical_height: i32,
     extra_clearance: i32,
 ) {
     #[cfg(windows)]
     {
         if let Some(hwnd) = hwnd_of(window) {
-            place_flyout_hwnd(hwnd, anchor, width, height, extra_clearance);
+            let scale = window.scale_factor().clamp(0.5, 4.0);
+            place_flyout_hwnd(
+                hwnd,
+                anchor,
+                logical_width,
+                logical_height,
+                scale,
+                extra_clearance,
+            );
         }
     }
     #[cfg(not(windows))]
     {
-        let _ = (window, anchor, width, height, extra_clearance);
+        let _ = (
+            window,
+            anchor,
+            logical_width,
+            logical_height,
+            extra_clearance,
+        );
     }
 }
 
 /// Fallback origin used as the initial `window_bounds` so GPUI's first draw
 /// has a real size (not a transparent 0-content popup).
+///
+/// Leaves a typical taskbar strip so the first paint is already above the bar
+/// (the old first-display `height - 320` origin sat *in* the taskbar).
 pub fn flyout_fallback_origin(cx: &App) -> Point<gpui::Pixels> {
     if let Some(display) = cx.displays().first() {
         let bounds = display.bounds();
+        let taskbar = (FLYOUT_TYPICAL_TASKBAR_PX + FLYOUT_TASKBAR_CLEARANCE_PX) as f32;
         return point(
             bounds.origin.x + bounds.size.width
                 - px((FLYOUT_WIDTH_PX + FLYOUT_TASKBAR_CLEARANCE_PX) as f32),
-            bounds.origin.y + bounds.size.height
-                - px((FLYOUT_HEIGHT_PX + FLYOUT_TASKBAR_CLEARANCE_PX + 48) as f32),
+            bounds.origin.y + bounds.size.height - px(FLYOUT_HEIGHT_PX as f32) - px(taskbar),
         );
     }
     point(px(24.), px(24.))
+}
+
+/// Bottom inset reserved so the panel cannot overlap the taskbar.
+///
+/// When `rcWork` already excludes the bar, only `extra_clearance` is added.
+/// When work equals the full monitor (auto-hide), reserve a typical taskbar
+/// plus the extra gap.
+pub fn flyout_bottom_clearance(
+    monitor: (i32, i32, i32, i32),
+    work: (i32, i32, i32, i32),
+    extra_clearance: i32,
+) -> i32 {
+    let extra_clearance = extra_clearance.max(0);
+    let measured = (monitor.3 - work.3).max(0);
+    if measured == 0 {
+        extra_clearance + FLYOUT_TYPICAL_TASKBAR_PX
+    } else {
+        extra_clearance
+    }
 }
 
 /// Compute a flyout origin that sits above `anchor` and stays inside `work`.
@@ -244,27 +284,50 @@ pub fn flyout_origin_in_work_area(
     flyout_h: i32,
     extra_clearance: i32,
 ) -> (i32, i32) {
+    let monitor_bottom = work.3.max(anchor.1 + anchor.3);
+    flyout_origin_above_icon(
+        (work.0, work.1, work.2, monitor_bottom),
+        work,
+        anchor,
+        flyout_w,
+        flyout_h,
+        FLYOUT_ICON_GAP_PX,
+        extra_clearance,
+    )
+}
+
+/// Icon-relative origin: right-aligned to the tray icon, above it + `icon_gap`,
+/// then clamped so the panel fully clears the taskbar / work area.
+pub fn flyout_origin_above_icon(
+    monitor: (i32, i32, i32, i32),
+    work: (i32, i32, i32, i32),
+    anchor: (i32, i32, i32, i32),
+    flyout_w: i32,
+    flyout_h: i32,
+    icon_gap: i32,
+    extra_clearance: i32,
+) -> (i32, i32) {
     let (work_left, work_top, work_right, work_bottom) = work;
     let (anchor_x, anchor_y, anchor_w, anchor_h) = anchor;
     let work_w = (work_right - work_left).max(0);
-    let work_h = (work_bottom - work_top).max(0);
     let flyout_w = flyout_w.max(1);
     let flyout_h = flyout_h.max(1);
-    let extra_clearance = extra_clearance.max(0);
+    let icon_gap = icon_gap.max(0);
+    let edge = flyout_bottom_clearance(monitor, work, extra_clearance);
 
     let max_x = work_left + (work_w - flyout_w).max(0);
-    let max_y = work_top + (work_h - extra_clearance - flyout_h).max(0);
+    let safe_bottom = work_bottom - edge;
+    let max_y = work_top + (safe_bottom - work_top - flyout_h).max(0);
 
-    // Right-align to the icon; tray icons sit at the right of the taskbar.
+    // Right-align to the icon; notification-area icons sit at the right.
     let x = (anchor_x + anchor_w - flyout_w).clamp(work_left, max_x);
 
-    // Prefer immediately above the icon. Tray icons usually live *below* rcWork.
-    let mut y = anchor_y - extra_clearance - flyout_h;
-    if anchor_y + anchor_h > work_bottom || y + flyout_h > work_bottom - extra_clearance {
-        y = work_bottom - extra_clearance - flyout_h;
-    }
+    // Prefer immediately above the icon. Icons usually live *in* the taskbar.
+    let y_above_icon = anchor_y - icon_gap - flyout_h;
+    let y_above_bar = safe_bottom - flyout_h;
+    let mut y = y_above_icon.min(y_above_bar);
     if y < work_top {
-        y = (anchor_y + anchor_h + extra_clearance).min(max_y);
+        y = (anchor_y + anchor_h + icon_gap).min(max_y);
     }
     y = y.clamp(work_top, max_y);
     (x, y)
@@ -274,18 +337,20 @@ pub fn flyout_origin_in_work_area(
 fn place_flyout_hwnd(
     hwnd: windows::Win32::Foundation::HWND,
     anchor: Option<TrayIconAnchor>,
-    width: i32,
-    height: i32,
+    logical_width: i32,
+    logical_height: i32,
+    scale: f32,
     extra_clearance: i32,
 ) {
+    use windows::Win32::Foundation::{POINT, RECT};
     use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        GetMonitorInfoW, MonitorFromPoint, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, GetWindowLongW, SetForegroundWindow, SetWindowLongW, SetWindowPos,
-        ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_SHOWWINDOW,
-        SW_SHOWNA, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
+        GetCursorPos, GetWindowLongW, GetWindowRect, SetForegroundWindow, SetWindowLongW,
+        SetWindowPos, ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED,
+        SWP_SHOWWINDOW, SW_SHOWNA, WS_CAPTION, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW,
+        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
     };
 
     unsafe {
@@ -293,21 +358,43 @@ fn place_flyout_hwnd(
             return;
         }
 
-        // gpui 0.2.2 PopUp windows are created with WINDOW_STYLE(0). Give the
-        // HWND a real popup style so children can paint (not an empty frame).
-        let style = (WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS).0 as i32;
+        // gpui 0.2.2 PopUp windows are created with WINDOW_STYLE(0). Force a
+        // caption-free popup so this is a panel, not a titled tool window.
+        let style = (WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS).0 as i32
+            & !((WS_CAPTION | WS_THICKFRAME).0 as i32);
         SetWindowLongW(hwnd, GWL_STYLE, style);
         let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
         let ex =
             (ex | WS_EX_TOOLWINDOW.0 | WS_EX_TOPMOST.0) & !WS_EX_APPWINDOW.0 & !WS_EX_LAYERED.0;
         SetWindowLongW(hwnd, GWL_EXSTYLE, ex as i32);
+        apply_flyout_hwnd_chrome(hwnd);
 
-        let width = width.max(1);
-        let height = height.max(1);
+        let want_w = ((logical_width.max(1) as f32) * scale).round() as i32;
+        let want_h = ((logical_height.max(1) as f32) * scale).round() as i32;
+        let (width, height) = flyout_physical_size(hwnd, want_w, want_h);
 
-        let mut cursor = windows::Win32::Foundation::POINT::default();
+        let mut cursor = POINT::default();
         let _ = GetCursorPos(&mut cursor);
-        let monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        let anchor = anchor.unwrap_or(TrayIconAnchor {
+            x: cursor.x,
+            y: cursor.y,
+            width: 16,
+            height: 16,
+        });
+        let icon_rect = RECT {
+            left: anchor.x,
+            top: anchor.y,
+            right: anchor.x + anchor.width.max(1),
+            bottom: anchor.y + anchor.height.max(1),
+        };
+        let monitor = {
+            let from_icon = MonitorFromRect(&icon_rect, MONITOR_DEFAULTTONEAREST);
+            if from_icon.0.is_null() {
+                MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST)
+            } else {
+                from_icon
+            }
+        };
         let mut info = MONITORINFO {
             cbSize: std::mem::size_of::<MONITORINFO>() as u32,
             ..Default::default()
@@ -316,17 +403,14 @@ fn place_flyout_hwnd(
             return;
         }
         let work = info.rcWork;
-        let anchor = anchor.unwrap_or(TrayIconAnchor {
-            x: cursor.x,
-            y: cursor.y,
-            width: 16,
-            height: 16,
-        });
-        let (x, y) = flyout_origin_in_work_area(
+        let screen = info.rcMonitor;
+        let (x, y) = flyout_origin_above_icon(
+            (screen.left, screen.top, screen.right, screen.bottom),
             (work.left, work.top, work.right, work.bottom),
             (anchor.x, anchor.y, anchor.width, anchor.height),
             width,
             height,
+            FLYOUT_ICON_GAP_PX,
             extra_clearance,
         );
 
@@ -341,6 +425,65 @@ fn place_flyout_hwnd(
         );
         let _ = ShowWindow(hwnd, SW_SHOWNA);
         let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+/// Prefer the HWND's current size when it already matches DPI-scaled logical size.
+#[cfg(windows)]
+fn flyout_physical_size(
+    hwnd: windows::Win32::Foundation::HWND,
+    want_w: i32,
+    want_h: i32,
+) -> (i32, i32) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let want_w = want_w.max(1);
+    let want_h = want_h.max(1);
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+        return (want_w, want_h);
+    }
+    let actual_w = rect.right - rect.left;
+    let actual_h = rect.bottom - rect.top;
+    if actual_w <= 0 || actual_h <= 0 {
+        return (want_w, want_h);
+    }
+    let near = |actual: i32, want: i32| {
+        let slack = (want.abs() / 4).max(8);
+        (actual - want).abs() <= slack
+    };
+    if near(actual_w, want_w) && near(actual_h, want_h) {
+        (actual_w, actual_h)
+    } else {
+        (want_w, want_h)
+    }
+}
+
+/// Dark, rounded popup chrome (Win11 DWM). No-op on older builds.
+#[cfg(windows)]
+fn apply_flyout_hwnd_chrome(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::Win32::Foundation::BOOL;
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE,
+        DWMWCP_ROUND,
+    };
+
+    unsafe {
+        let dark = BOOL::from(true);
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &dark as *const _ as *const _,
+            std::mem::size_of_val(&dark) as u32,
+        );
+        let corners = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corners as *const _ as *const _,
+            std::mem::size_of_val(&corners) as u32,
+        );
     }
 }
 
@@ -374,13 +517,16 @@ mod tests {
     #[test]
     fn flyout_sits_above_taskbar_icon_with_clearance() {
         // 1920×1080, 40px taskbar → rcWork bottom = 1040. Icon lives in the taskbar.
+        let monitor = (0, 0, 1920, 1080);
         let work = (0, 0, 1920, 1040);
         let icon = (1860, 1048, 24, 24);
-        let (x, y) = flyout_origin_in_work_area(
+        let (x, y) = flyout_origin_above_icon(
+            monitor,
             work,
             icon,
             FLYOUT_WIDTH_PX,
             FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
             FLYOUT_TASKBAR_CLEARANCE_PX,
         );
         assert!(x >= 0 && x + FLYOUT_WIDTH_PX <= 1920);
@@ -390,19 +536,92 @@ mod tests {
             "flyout must fully clear the taskbar, y={y}"
         );
         assert!(
-            y + FLYOUT_HEIGHT_PX <= icon.1,
-            "flyout must sit above the icon"
+            y + FLYOUT_HEIGHT_PX + FLYOUT_ICON_GAP_PX <= icon.1,
+            "flyout must sit above the icon + gap"
         );
     }
 
     #[test]
+    fn flyout_clears_tall_taskbar() {
+        // 72px taskbar (large / tablet). Old first-display y = 1080-320 sits in the bar.
+        let monitor = (0, 0, 1920, 1080);
+        let work = (0, 0, 1920, 1008);
+        let icon = (1860, 1020, 24, 24);
+        let (x, y) = flyout_origin_above_icon(
+            monitor,
+            work,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert!(x + FLYOUT_WIDTH_PX <= 1920);
+        assert!(
+            y + FLYOUT_HEIGHT_PX + FLYOUT_TASKBAR_CLEARANCE_PX <= 1008,
+            "must clear a 72px taskbar, y={y}"
+        );
+        assert!(y + FLYOUT_HEIGHT_PX <= icon.1);
+        assert_ne!(
+            y,
+            1080 - 320,
+            "must not use first-display height-320 origin"
+        );
+    }
+
+    #[test]
+    fn flyout_clears_autohide_taskbar_using_icon() {
+        // Auto-hide: rcWork == rcMonitor. Sit above the icon and reserve a typical bar.
+        let screen = (0, 0, 1920, 1080);
+        let icon = (1860, 1048, 24, 24);
+        let (x, y) = flyout_origin_above_icon(
+            screen,
+            screen,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert!(x + FLYOUT_WIDTH_PX <= 1920);
+        assert!(
+            y + FLYOUT_HEIGHT_PX + FLYOUT_TYPICAL_TASKBAR_PX + FLYOUT_TASKBAR_CLEARANCE_PX <= 1080,
+            "auto-hide must still reserve a taskbar strip, y={y}"
+        );
+        assert!(y + FLYOUT_HEIGHT_PX <= icon.1);
+    }
+
+    #[test]
     fn flyout_stays_on_screen_at_left_edge() {
-        let work = (0, 0, 800, 600);
-        let icon = (8, 580, 24, 24);
-        let (x, y) = flyout_origin_in_work_area(work, icon, 308, 400, 20);
+        let work = (0, 0, 800, 560);
+        let icon = (8, 572, 24, 24);
+        let (x, y) = flyout_origin_in_work_area(
+            work,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
         assert!(x >= 0);
-        assert!(x + 308 <= 800);
+        assert!(x + FLYOUT_WIDTH_PX <= 800);
         assert!(y >= 0);
-        assert!(y + 400 + 20 <= 600);
+        assert!(y + FLYOUT_HEIGHT_PX + FLYOUT_TASKBAR_CLEARANCE_PX <= 560);
+    }
+
+    #[test]
+    fn flyout_right_aligns_to_icon() {
+        let monitor = (0, 0, 1920, 1080);
+        let work = (0, 0, 1920, 1040);
+        let icon = (1700, 1048, 24, 24);
+        let (x, _) = flyout_origin_above_icon(
+            monitor,
+            work,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert_eq!(x, 1700 + 24 - FLYOUT_WIDTH_PX);
     }
 }
