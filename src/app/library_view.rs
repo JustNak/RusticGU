@@ -30,8 +30,12 @@ impl LibraryApp {
         let selected = self.selected_ids.clone();
         let scanning = self.library_scanning;
         let error = self.library_error.clone();
-        let progress = self.compact_progress.clone();
-        let busy = self.compact_busy;
+        let progress = if self.compact_flow.is_some() {
+            None
+        } else {
+            self.compact_progress.clone()
+        };
+        let busy = self.compact_busy || self.compact_flow.is_some();
         let filter = self.filter;
         let selected_n = self.selected_titles().len();
 
@@ -80,7 +84,7 @@ impl LibraryApp {
                                         .label(label)
                                         .disabled(busy)
                                         .on_click(cx.listener(|this, _, window, cx| {
-                                            this.open_compact_level_dialog(window, cx);
+                                            this.open_compact_flow(window, cx);
                                         })),
                                 )
                             })
