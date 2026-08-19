@@ -9,7 +9,7 @@
 
 <p align="center">
   <strong>A Windows game-library compact tool.</strong><br>
-  Transparent WOF <code>compact /EXE</code> so titles stay playable. Rust + GPUI, dark launcher-card UI, tray flyout.
+  Transparent WOF compression so titles stay playable, with Live Compact after patches.
 </p>
 
 <p align="center">
@@ -71,8 +71,8 @@ RusticGU is a **game-library compact tool** for Windows. It uses transparent WOF
 - Steam library cards (logical vs on-disk size when cheap to read)
 - Compact / uncompact a selected game folder (default **XPRESS8K**)
 - Tray flyout: compact vs inflated summary, pause Live Compact, one-click recompact, open main window
-- **Live Compact** (later) recompacts after patches with XPRESS8K; games stay playable
-- **Shelf** (later) is the only LZX path, for cold games
+- **Live Compact** recompacts after patches with XPRESS8K; games stay playable
+- **Shelf** is the only LZX path, for cold games
 
 **Requirements:** Windows 10 version 1607+, NTFS, launcher indexes.
 
@@ -153,12 +153,10 @@ To publish a **nightly**: Actions → **Nightly** → **Run workflow**.
 │   ├── app/              GPUI chrome, settings, toasts, tray flyout
 │   ├── library/          Steam scan
 │   ├── compact/          WOF compact /EXE engine
-│   ├── settings.rs
 │   ├── updater.rs
 │   └── branding.rs
 ├── apps/updater/         Dedicated self-update helper
 ├── assets/brand/         Icons and logo
-├── installer/nsis/       NSIS template
 ├── scripts/              Icon regen + NSIS packaging
 └── .github/workflows/    CI, Nightly, Release
 ```
@@ -186,15 +184,13 @@ Output: `dist-release/RusticGU-windows-x64-setup.exe`.
 
 ## Continuous integration
 
-GitHub Actions workflows live in `.github/workflows/`:
+Intended GitHub Actions workflows (same shape as Rustic-AT) live in `.github/workflows/`:
 
 | Workflow | When it runs | What it does |
 | --- | --- | --- |
-| **CI** (`ci.yml`) | Push / PR to `main` | `cargo fmt` check, `clippy`, `test` on Windows |
+| **CI** (`ci.yml`) | Push / PR to `main` | `cargo fmt` check, `clippy`, `test` |
 | **Release** (`release.yml`) | Tag `v*` except `v*-nightly.*` | Build Windows NSIS installer + zip; publish a **Stable** GitHub Release |
 | **Nightly** (`nightly.yml`) | Manual **Run workflow** only | Same installer + zip as Release, stamped `X.Y.Z-nightly.YYYYMMDDHHMMSS`, published as a GitHub **pre-release** (`make_latest: false`). Skips when that commit already has a nightly. Keeps the last 14 nightlies. |
-
----
 
 ## Contributing / attribution
 
@@ -207,8 +203,6 @@ If you **fork, modify, redistribute, or ship** RusticGU (including commercial pr
 - Upstream: https://github.com/JustNak/RusticGU
 
 That attribution requirement is part of the MIT license terms for this repository.
-
----
 
 ## License
 
