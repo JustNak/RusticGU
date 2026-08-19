@@ -72,6 +72,8 @@ impl LibraryApp {
         }
     }
 
+    /// Full quit. Used by the flyout footer Exit button (QA FAIL #3) and by
+    /// the tray-menu exit command — not tray-menu only.
     pub(crate) fn force_quit_app(&mut self, cx: &mut Context<Self>) {
         self.force_quit = true;
         self.flush_window_layout_now();

@@ -1,8 +1,14 @@
 //! Compact Proton-style tray panel: header + one primary + list + footer.
 //!
-//! No title-bar chrome (`titlebar: None`, no `Root` / `TitleBar`). Root's
-//! `window_border` paints a transparent backdrop and reads as an empty HWND.
-//! Open from the tray event (never from `LibraryApp::render`).
+//! QA FAIL #1 — chrome-less: `WindowKind::PopUp`, `titlebar: None`. Do not import
+//! or apply client title-bar options. The panel paints its own header.
+//! QA FAIL #2 — place from `Shell_NotifyIconGetRect` + work area (see
+//! `window_placement` / `tray::anchor_from_notify_rect`).
+//! QA FAIL #3 — footer **Open RusticGU** + **Exit** on the panel; Exit calls
+//! `force_quit_app` (not tray-menu `ID_TRAY_EXIT` only).
+//!
+//! Do not wrap in `gpui_component::Root` — Root's `window_border` paints a
+//! transparent backdrop. Open from the tray event (never `LibraryApp::render`).
 
 use std::time::Instant;
 
@@ -264,6 +270,34 @@ fn render_list(
         }))
 }
 
+/// Footer buttons painted on the flyout itself (QA FAIL #3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlyoutFooterItem {
+    OpenRusticGu,
+    Exit,
+}
+
+/// What the footer Exit button does — full process quit, same as `ID_TRAY_EXIT`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlyoutExitCommand {
+    ForceQuit,
+}
+
+pub(crate) fn flyout_footer_items() -> [FlyoutFooterItem; 2] {
+    [FlyoutFooterItem::OpenRusticGu, FlyoutFooterItem::Exit]
+}
+
+pub(crate) fn flyout_footer_label(item: FlyoutFooterItem) -> &'static str {
+    match item {
+        FlyoutFooterItem::OpenRusticGu => "Open RusticGU",
+        FlyoutFooterItem::Exit => "Exit",
+    }
+}
+
+pub(crate) fn flyout_exit_command() -> FlyoutExitCommand {
+    FlyoutExitCommand::ForceQuit
+}
+
 fn render_footer(app: gpui::Entity<LibraryApp>, muted: gpui::Hsla) -> impl IntoElement {
     h_flex()
         .id("tray-flyout-footer")
@@ -277,7 +311,7 @@ fn render_footer(app: gpui::Entity<LibraryApp>, muted: gpui::Hsla) -> impl IntoE
                 .compact()
                 .text_color(muted)
                 .icon(Icon::empty().path("icons/external-link.svg"))
-                .label("Open RusticGU")
+                .label(flyout_footer_label(FlyoutFooterItem::OpenRusticGu))
                 .on_click({
                     let app = app.clone();
                     move |_, _, cx| {
@@ -293,8 +327,9 @@ fn render_footer(app: gpui::Entity<LibraryApp>, muted: gpui::Hsla) -> impl IntoE
                 .compact()
                 .text_color(muted)
                 .icon(Icon::empty().path("icons/window-close.svg"))
-                .label("Exit")
+                .label(flyout_footer_label(FlyoutFooterItem::Exit))
                 .on_click(move |_, _, cx| {
+                    debug_assert_eq!(flyout_exit_command(), FlyoutExitCommand::ForceQuit);
                     app.update(cx, |app, cx| {
                         app.force_quit_app(cx);
                     });
@@ -472,7 +507,10 @@ impl LibraryApp {
     }
 }
 
-/// Caption-free popup options. No `TitleBar` / client chrome — Proton panel only.
+/// Caption-free popup options.
+///
+/// QA FAIL #1: `titlebar: None`. Client decorations stay off. The painted
+/// header is the only chrome.
 pub(crate) fn flyout_window_options(
     bounds: Bounds<gpui::Pixels>,
     size: Size<gpui::Pixels>,
@@ -633,7 +671,7 @@ mod tests {
         let opts = flyout_window_options(bounds, size);
         assert!(
             opts.titlebar.is_none(),
-            "Proton panel must not open a TitleBar popup"
+            "QA FAIL #1: no TitleBar / title_bar_options"
         );
         assert!(
             opts.window_decorations.is_none(),
@@ -643,5 +681,47 @@ mod tests {
         assert!(!opts.is_resizable);
         assert!(!opts.is_movable);
         assert_eq!(opts.window_background, WindowBackgroundAppearance::Opaque);
+    }
+
+    #[test]
+    fn flyout_source_never_uses_titlebar_chrome() {
+        let src = include_str!("tray_flyout.rs");
+        let prod = src.split("#[cfg(test)]").next().expect("prod source");
+        assert!(
+            !prod.contains("TitleBar::"),
+            "must not call TitleBar::title_bar_options()"
+        );
+        assert!(
+            !prod.contains("title_bar_options"),
+            "must not pass TitleBar::title_bar_options()"
+        );
+        assert!(
+            !prod.contains("RusticGU tray"),
+            "must not set title \"RusticGU tray\""
+        );
+        assert!(
+            !prod.contains("px(348"),
+            "must not hardcode display width-348"
+        );
+    }
+
+    #[test]
+    fn flyout_footer_has_open_and_exit() {
+        let items = flyout_footer_items();
+        assert_eq!(items[0], FlyoutFooterItem::OpenRusticGu);
+        assert_eq!(items[1], FlyoutFooterItem::Exit);
+        assert_eq!(
+            flyout_footer_label(FlyoutFooterItem::OpenRusticGu),
+            "Open RusticGU"
+        );
+        assert_eq!(flyout_footer_label(FlyoutFooterItem::Exit), "Exit");
+        assert_eq!(
+            flyout_exit_command(),
+            FlyoutExitCommand::ForceQuit,
+            "QA FAIL #3: panel Exit must quit the app, not only ID_TRAY_EXIT"
+        );
+        let src = include_str!("tray_flyout.rs");
+        assert!(src.contains("force_quit_app"));
+        assert!(src.contains("flyout-exit"));
     }
 }

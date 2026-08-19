@@ -68,6 +68,29 @@ pub struct TrayIconAnchor {
     pub height: i32,
 }
 
+/// Convert a `Shell_NotifyIconGetRect` screen RECT into an icon anchor.
+///
+/// QA FAIL #2: placement must use this notify-icon rect, not a hardcoded
+/// display corner (`width-348`, `height-320`).
+pub fn anchor_from_notify_rect(
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+) -> Option<TrayIconAnchor> {
+    let width = right - left;
+    let height = bottom - top;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+    Some(TrayIconAnchor {
+        x: left,
+        y: top,
+        width,
+        height,
+    })
+}
+
 /// Cursor position as a 16×16 anchor when the icon rect is unavailable.
 pub fn cursor_anchor() -> Option<TrayIconAnchor> {
     #[cfg(windows)]
@@ -769,15 +792,10 @@ mod windows_impl {
             };
             let mut rect = RECT::default();
             if unsafe { Shell_NotifyIconGetRect(&ident, &mut rect) }.is_ok() {
-                let width = rect.right - rect.left;
-                let height = rect.bottom - rect.top;
-                if width > 0 && height > 0 {
-                    return Some(super::TrayIconAnchor {
-                        x: rect.left,
-                        y: rect.top,
-                        width,
-                        height,
-                    });
+                if let Some(anchor) =
+                    super::anchor_from_notify_rect(rect.left, rect.top, rect.right, rect.bottom)
+                {
+                    return Some(anchor);
                 }
             }
         }
@@ -798,7 +816,10 @@ mod windows_impl {
 
 #[cfg(test)]
 mod tests {
-    use super::{truncate_utf16_units, BALLOON_BODY_MAX_UTF16, BALLOON_TITLE_MAX_UTF16};
+    use super::{
+        anchor_from_notify_rect, truncate_utf16_units, BALLOON_BODY_MAX_UTF16,
+        BALLOON_TITLE_MAX_UTF16,
+    };
 
     #[test]
     fn truncate_short_unchanged() {
@@ -835,5 +856,16 @@ mod tests {
     #[test]
     fn truncate_zero_is_empty() {
         assert_eq!(truncate_utf16_units("abc", 0), "");
+    }
+
+    #[test]
+    fn notify_icon_rect_becomes_anchor() {
+        // Shell_NotifyIconGetRect → (left, top, right, bottom) in screen pixels.
+        let anchor = anchor_from_notify_rect(1860, 1048, 1884, 1072).expect("valid icon rect");
+        assert_eq!(anchor.x, 1860);
+        assert_eq!(anchor.y, 1048);
+        assert_eq!(anchor.width, 24);
+        assert_eq!(anchor.height, 24);
+        assert!(anchor_from_notify_rect(10, 10, 10, 20).is_none());
     }
 }

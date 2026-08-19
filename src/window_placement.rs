@@ -251,23 +251,63 @@ pub fn flyout_fallback_origin(cx: &App) -> Point<gpui::Pixels> {
     point(px(24.), px(24.))
 }
 
-/// Bottom inset reserved so the panel cannot overlap the taskbar.
+/// The old b9133c8 origin: first-display bottom-right minus 348×320.
+/// Tests assert live placement never returns this (it clips into the taskbar).
+pub fn legacy_hardcoded_display_corner(display_w: i32, display_h: i32) -> (i32, i32) {
+    (display_w - 348, display_h - 320)
+}
+
+/// Safe work rectangle: `rcWork` inset on every taskbar edge + extra gap.
 ///
-/// When `rcWork` already excludes the bar, only `extra_clearance` is added.
-/// When work equals the full monitor (auto-hide), reserve a typical taskbar
-/// plus the extra gap.
-pub fn flyout_bottom_clearance(
+/// Auto-hide (`rcWork == rcMonitor`) reserves a typical taskbar on the edge
+/// nearest the notify-icon rect so the whole panel still clears the bar.
+pub fn flyout_safe_work(
     monitor: (i32, i32, i32, i32),
     work: (i32, i32, i32, i32),
     extra_clearance: i32,
-) -> i32 {
-    let extra_clearance = extra_clearance.max(0);
-    let measured = (monitor.3 - work.3).max(0);
-    if measured == 0 {
-        extra_clearance + FLYOUT_TYPICAL_TASKBAR_PX
-    } else {
-        extra_clearance
+    icon: (i32, i32, i32, i32),
+) -> (i32, i32, i32, i32) {
+    let extra = extra_clearance.max(0);
+    let (ml, mt, mr, mb) = monitor;
+    let (wl, wt, wr, wb) = work;
+    let inset_l = (wl - ml).max(0);
+    let inset_t = (wt - mt).max(0);
+    let inset_r = (mr - wr).max(0);
+    let inset_b = (mb - wb).max(0);
+
+    let mut left = wl + if inset_l > 0 { extra } else { 0 };
+    let mut top = wt + if inset_t > 0 { extra } else { 0 };
+    let mut right = wr - if inset_r > 0 { extra } else { 0 };
+    let mut bottom = wb - if inset_b > 0 { extra } else { 0 };
+
+    if inset_l + inset_t + inset_r + inset_b == 0 {
+        let (ix, iy, iw, ih) = icon;
+        let icx = ix + iw / 2;
+        let icy = iy + ih / 2;
+        let dist_l = icx - ml;
+        let dist_t = icy - mt;
+        let dist_r = mr - icx;
+        let dist_b = mb - icy;
+        let nearest = dist_l.min(dist_t).min(dist_r).min(dist_b);
+        let reserve = extra + FLYOUT_TYPICAL_TASKBAR_PX;
+        if nearest == dist_b {
+            bottom = mb - reserve;
+        } else if nearest == dist_t {
+            top = mt + reserve;
+        } else if nearest == dist_l {
+            left = ml + reserve;
+        } else {
+            right = mr - reserve;
+        }
     }
+
+    if right <= left {
+        right = left + 1;
+    }
+    if bottom <= top {
+        bottom = top + 1;
+    }
+    (left, top, right, bottom)
 }
 
 /// Compute a flyout origin that sits above `anchor` and stays inside `work`.
@@ -296,8 +336,11 @@ pub fn flyout_origin_in_work_area(
     )
 }
 
-/// Icon-relative origin: right-aligned to the tray icon, above it + `icon_gap`,
-/// then clamped so the panel fully clears the taskbar / work area.
+/// Icon-relative origin from the notify-icon rect + work area.
+///
+/// QA FAIL #2: sit the **whole** panel off the taskbar. Prefer the interior
+/// side of the icon (above a bottom bar, below a top bar, beside a side bar).
+/// Never the hardcoded `(display_w-348, display_h-320)` corner.
 pub fn flyout_origin_above_icon(
     monitor: (i32, i32, i32, i32),
     work: (i32, i32, i32, i32),
@@ -307,29 +350,40 @@ pub fn flyout_origin_above_icon(
     icon_gap: i32,
     extra_clearance: i32,
 ) -> (i32, i32) {
-    let (work_left, work_top, work_right, work_bottom) = work;
+    let (safe_l, safe_t, safe_r, safe_b) = flyout_safe_work(monitor, work, extra_clearance, anchor);
     let (anchor_x, anchor_y, anchor_w, anchor_h) = anchor;
-    let work_w = (work_right - work_left).max(0);
     let flyout_w = flyout_w.max(1);
     let flyout_h = flyout_h.max(1);
     let icon_gap = icon_gap.max(0);
-    let edge = flyout_bottom_clearance(monitor, work, extra_clearance);
 
-    let max_x = work_left + (work_w - flyout_w).max(0);
-    let safe_bottom = work_bottom - edge;
-    let max_y = work_top + (safe_bottom - work_top - flyout_h).max(0);
+    let max_x = safe_l + (safe_r - safe_l - flyout_w).max(0);
+    let max_y = safe_t + (safe_b - safe_t - flyout_h).max(0);
 
-    // Right-align to the icon; notification-area icons sit at the right.
-    let x = (anchor_x + anchor_w - flyout_w).clamp(work_left, max_x);
+    let icon_right = anchor_x + anchor_w;
+    let icon_bottom = anchor_y + anchor_h;
+    let prefer_right_of_icon = icon_right <= safe_l;
+    let prefer_left_of_icon = anchor_x >= safe_r;
+    let prefer_below_icon = icon_bottom <= safe_t;
+    let prefer_above_icon = anchor_y >= safe_b;
 
-    // Prefer immediately above the icon. Icons usually live *in* the taskbar.
-    let y_above_icon = anchor_y - icon_gap - flyout_h;
-    let y_above_bar = safe_bottom - flyout_h;
-    let mut y = y_above_icon.min(y_above_bar);
-    if y < work_top {
-        y = (anchor_y + anchor_h + icon_gap).min(max_y);
-    }
-    y = y.clamp(work_top, max_y);
+    let mut x = if prefer_right_of_icon {
+        icon_right + icon_gap
+    } else if prefer_left_of_icon {
+        anchor_x - icon_gap - flyout_w
+    } else {
+        icon_right - flyout_w
+    };
+
+    let mut y = if prefer_below_icon {
+        icon_bottom + icon_gap
+    } else if prefer_above_icon {
+        anchor_y - icon_gap - flyout_h
+    } else {
+        anchor_y - icon_gap - flyout_h
+    };
+
+    x = x.clamp(safe_l, max_x);
+    y = y.clamp(safe_t, max_y);
     (x, y)
 }
 
@@ -623,5 +677,112 @@ mod tests {
             FLYOUT_TASKBAR_CLEARANCE_PX,
         );
         assert_eq!(x, 1700 + 24 - FLYOUT_WIDTH_PX);
+    }
+
+    fn panel_inside(origin: (i32, i32), w: i32, h: i32, rect: (i32, i32, i32, i32)) {
+        let (x, y) = origin;
+        assert!(x >= rect.0, "left {x} < {}", rect.0);
+        assert!(y >= rect.1, "top {y} < {}", rect.1);
+        assert!(x + w <= rect.2, "right {} > {}", x + w, rect.2);
+        assert!(y + h <= rect.3, "bottom {} > {}", y + h, rect.3);
+    }
+
+    #[test]
+    fn flyout_is_not_hardcoded_display_corner() {
+        // QA FAIL #2: b9133c8 used first-display (width-348, height-320).
+        let monitor = (0, 0, 1920, 1080);
+        let work = (0, 0, 1920, 1040);
+        let icon = crate::tray::anchor_from_notify_rect(1860, 1048, 1884, 1072).unwrap();
+        let origin = flyout_origin_above_icon(
+            monitor,
+            work,
+            (icon.x, icon.y, icon.width, icon.height),
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert_ne!(origin, legacy_hardcoded_display_corner(1920, 1080));
+        assert_ne!(origin, (1920 - 348, 1080 - 320));
+        panel_inside(
+            origin,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            flyout_safe_work(
+                monitor,
+                work,
+                FLYOUT_TASKBAR_CLEARANCE_PX,
+                (icon.x, icon.y, icon.width, icon.height),
+            ),
+        );
+    }
+
+    #[test]
+    fn flyout_clears_top_taskbar() {
+        let monitor = (0, 0, 1920, 1080);
+        let work = (0, 40, 1920, 1080);
+        let icon = (1860, 8, 24, 24);
+        let (x, y) = flyout_origin_above_icon(
+            monitor,
+            work,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert!(y >= 40 + FLYOUT_TASKBAR_CLEARANCE_PX);
+        panel_inside(
+            (x, y),
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            flyout_safe_work(monitor, work, FLYOUT_TASKBAR_CLEARANCE_PX, icon),
+        );
+    }
+
+    #[test]
+    fn flyout_clears_left_taskbar() {
+        let monitor = (0, 0, 1920, 1080);
+        let work = (48, 0, 1920, 1080);
+        let icon = (8, 1040, 24, 24);
+        let (x, y) = flyout_origin_above_icon(
+            monitor,
+            work,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert!(x >= 48 + FLYOUT_TASKBAR_CLEARANCE_PX);
+        panel_inside(
+            (x, y),
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            flyout_safe_work(monitor, work, FLYOUT_TASKBAR_CLEARANCE_PX, icon),
+        );
+    }
+
+    #[test]
+    fn flyout_clears_right_taskbar() {
+        let monitor = (0, 0, 1920, 1080);
+        let work = (0, 0, 1872, 1080);
+        let icon = (1880, 1040, 24, 24);
+        let (x, y) = flyout_origin_above_icon(
+            monitor,
+            work,
+            icon,
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            FLYOUT_ICON_GAP_PX,
+            FLYOUT_TASKBAR_CLEARANCE_PX,
+        );
+        assert!(x + FLYOUT_WIDTH_PX <= 1872 - FLYOUT_TASKBAR_CLEARANCE_PX);
+        panel_inside(
+            (x, y),
+            FLYOUT_WIDTH_PX,
+            FLYOUT_HEIGHT_PX,
+            flyout_safe_work(monitor, work, FLYOUT_TASKBAR_CLEARANCE_PX, icon),
+        );
     }
 }
