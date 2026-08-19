@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use stores::{DiscoveredTitle, StoreId};
 
-use super::steam::{cheap_install_sizes, SteamGame};
+use super::steam::{cheap_install_sizes, sizes_indicate_compacted, SteamGame};
 
 /// One row in the unified library. Dual-registered titles appear twice.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +18,9 @@ pub struct LibraryTitle {
     pub last_played_unix: Option<u64>,
     pub logical_bytes: Option<u64>,
     pub on_disk_bytes: Option<u64>,
+    /// Same-scope WOF probe (sampled files). Not inferred from Steam `SizeOnDisk`
+    /// vs a shallow folder listing.
+    pub compacted: bool,
     pub steam_app_id: Option<u32>,
     pub steam_library_path: Option<PathBuf>,
     pub steam_install_dir_name: Option<String>,
@@ -97,6 +100,7 @@ impl LibraryTitle {
             last_played_unix,
             logical_bytes: game.logical_bytes,
             on_disk_bytes: game.on_disk_bytes,
+            compacted: game.compacted,
             steam_app_id: Some(game.app_id),
             steam_library_path: Some(game.library_path),
             steam_install_dir_name: Some(game.install_dir_name),
@@ -119,6 +123,7 @@ impl LibraryTitle {
             last_played_unix,
             logical_bytes: logical,
             on_disk_bytes: on_disk,
+            compacted: sizes_indicate_compacted(on_disk, logical),
             steam_app_id: None,
             steam_library_path: None,
             steam_install_dir_name: None,
@@ -131,9 +136,50 @@ impl LibraryTitle {
     }
 
     pub fn is_compacted(&self) -> bool {
-        match (self.on_disk_bytes, self.logical_bytes) {
-            (Some(disk), Some(logical)) => disk + logical / 20 < logical,
-            _ => false,
+        self.compacted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::steam::sizes_indicate_compacted;
+    use std::path::PathBuf;
+
+    fn title(compacted: bool, logical: Option<u64>, on_disk: Option<u64>) -> LibraryTitle {
+        LibraryTitle {
+            id: "steam:1".into(),
+            name: "Test".into(),
+            install_path: PathBuf::from(r"D:\Steam\steamapps\common\Test"),
+            store: LibraryStore::Steam,
+            launcher_id: Some("1".into()),
+            last_played_unix: None,
+            logical_bytes: logical,
+            on_disk_bytes: on_disk,
+            compacted,
+            steam_app_id: Some(1),
+            steam_library_path: None,
+            steam_install_dir_name: None,
+            cover_url: None,
         }
+    }
+
+    #[test]
+    fn catalog_vs_shallow_sizes_do_not_mark_compacted() {
+        let game = title(false, Some(40_000_000_000), Some(4_096));
+        assert!(
+            !game.is_compacted(),
+            "SizeOnDisk vs a tiny root file must not count as compacted"
+        );
+        assert!(sizes_indicate_compacted(
+            game.on_disk_bytes,
+            game.logical_bytes
+        ));
+    }
+
+    #[test]
+    fn probe_flag_is_the_compacted_source() {
+        assert!(title(true, Some(20), Some(20)).is_compacted());
+        assert!(!title(false, Some(10), Some(4)).is_compacted());
     }
 }

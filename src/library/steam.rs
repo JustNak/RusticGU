@@ -46,7 +46,12 @@ pub struct SteamGame {
     /// Logical size from `SizeOnDisk` when present.
     pub logical_bytes: Option<u64>,
     /// On-disk size when cheap to read (directory metadata / compressed size).
+    ///
+    /// Only set when it is comparable to [`Self::logical_bytes`] (same file set).
+    /// Never a shallow listing paired with catalog `SizeOnDisk`.
     pub on_disk_bytes: Option<u64>,
+    /// Same-scope WOF probe: on-disk of sampled files is ≥5% below their logical size.
+    pub compacted: bool,
 }
 
 /// Scan every Steam library folder we can find.
@@ -255,84 +260,134 @@ pub fn game_from_acf(text: &str, library_path: &Path) -> Option<SteamGame> {
         library_path: library_path.to_path_buf(),
         logical_bytes,
         on_disk_bytes: None,
+        compacted: false,
     })
 }
 
 fn fill_cheap_sizes(game: &mut SteamGame) {
-    let (logical, on_disk) = cheap_install_sizes(&game.install_path);
+    let (cheap_logical, cheap_on_disk) = cheap_install_sizes(&game.install_path);
+    // Compacted status must compare the same file set. Steam `SizeOnDisk` is the
+    // full tree; a shallow/sampled listing is not a comparable on-disk total.
+    game.compacted = sizes_indicate_compacted(cheap_on_disk, cheap_logical);
     if game.logical_bytes.is_none() {
-        game.logical_bytes = logical;
+        game.logical_bytes = cheap_logical;
+        game.on_disk_bytes = cheap_on_disk;
+    } else {
+        game.on_disk_bytes = None;
     }
-    game.on_disk_bytes = on_disk.or(game.logical_bytes);
 }
 
-/// Shallow logical / on-disk sizes for an install folder (no full tree walk).
+/// True when on-disk size is at least 5% below logical for the **same** file set.
+///
+/// Catalog `SizeOnDisk` vs a handful of root files must never be passed in:
+/// a 4 KB `steam_appid.txt` against a 40 GB ACF size looks like 99% savings.
+pub fn sizes_indicate_compacted(on_disk: Option<u64>, logical: Option<u64>) -> bool {
+    match (on_disk, logical) {
+        (Some(disk), Some(logical)) if logical > 0 => disk.saturating_add(logical / 20) < logical,
+        _ => false,
+    }
+}
+
+/// Max files / depth for the cheap logical vs compressed probe (no full tree walk).
+const CHEAP_PROBE_FILES: usize = 48;
+const CHEAP_PROBE_DEPTH: usize = 3;
+
+/// Sampled logical / on-disk sizes for an install folder (no full tree walk).
+///
+/// Both numbers cover the **same** files. Nested folders are sampled so titles
+/// whose binaries live under `bin/` / `game/` still classify after a real compact.
 pub fn cheap_install_sizes(path: &Path) -> (Option<u64>, Option<u64>) {
     if !path.is_dir() {
         return (None, None);
     }
-    let logical = cheap_dir_size(path);
-    let on_disk = cheap_on_disk_size(path).or(logical);
-    (logical, on_disk)
+    let mut logical = 0u64;
+    let mut on_disk = 0u64;
+    let mut any = false;
+    for file in cheap_probe_files(path, CHEAP_PROBE_FILES, CHEAP_PROBE_DEPTH) {
+        let Some((file_logical, file_on_disk)) = file_logical_and_on_disk(&file) else {
+            continue;
+        };
+        logical = logical.saturating_add(file_logical);
+        on_disk = on_disk.saturating_add(file_on_disk);
+        any = true;
+    }
+    if any {
+        (Some(logical), Some(on_disk))
+    } else {
+        (None, None)
+    }
 }
 
-/// Shallow size: immediate children only (cheap; no full tree walk).
-fn cheap_dir_size(path: &Path) -> Option<u64> {
-    let entries = fs::read_dir(path).ok()?;
-    let mut total = 0u64;
-    for entry in entries.flatten() {
-        if let Ok(meta) = entry.metadata() {
+fn cheap_probe_files(root: &Path, max_files: usize, max_depth: usize) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    fn rec(dir: &Path, depth: usize, max_depth: usize, max_files: usize, out: &mut Vec<PathBuf>) {
+        if depth > max_depth || out.len() >= max_files {
+            return;
+        }
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut dirs = Vec::new();
+        for entry in entries.flatten() {
+            if out.len() >= max_files {
+                return;
+            }
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
             if meta.is_file() {
-                total = total.saturating_add(meta.len());
+                out.push(path);
+            } else if meta.is_dir() {
+                dirs.push(path);
             }
         }
+        for nested in dirs {
+            rec(&nested, depth + 1, max_depth, max_files, out);
+        }
     }
-    Some(total)
+    rec(root, 0, max_depth, max_files, &mut out);
+    out
 }
 
-fn cheap_on_disk_size(path: &Path) -> Option<u64> {
+fn file_logical_and_on_disk(path: &Path) -> Option<(u64, u64)> {
+    let meta = fs::metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    let logical = meta.len();
+    let on_disk = file_on_disk_size(path)?;
+    Some((logical, on_disk))
+}
+
+fn file_on_disk_size(path: &Path) -> Option<u64> {
     #[cfg(windows)]
     {
-        compressed_dir_size_shallow(path)
+        compressed_file_size(path)
     }
     #[cfg(not(windows))]
     {
-        let _ = path;
-        None
+        fs::metadata(path).ok().map(|m| m.len())
     }
 }
 
 #[cfg(windows)]
-fn compressed_dir_size_shallow(path: &Path) -> Option<u64> {
+fn compressed_file_size(path: &Path) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::GetCompressedFileSizeW;
 
-    let entries = fs::read_dir(path).ok()?;
-    let mut total = 0u64;
-    let mut any = false;
-    for entry in entries.flatten() {
-        let Ok(meta) = entry.metadata() else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let wide: Vec<u16> = entry
-            .path()
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-        let mut high = 0u32;
-        let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
-        if low == u32::MAX {
-            continue;
-        }
-        any = true;
-        total = total.saturating_add(((high as u64) << 32) | low as u64);
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut high = 0u32;
+    let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
+    if low == u32::MAX && high == 0 {
+        return None;
     }
-    any.then_some(total)
+    Some(((high as u64) << 32) | u64::from(low))
 }
 
 fn normalize_vdf_path(path: &str) -> String {
@@ -496,6 +551,8 @@ mod tests {
             ))
         );
         assert_eq!(game.logical_bytes, Some(40_000_000_000));
+        assert_eq!(game.on_disk_bytes, None);
+        assert!(!game.compacted);
     }
 
     #[test]
@@ -670,5 +727,107 @@ mod tests {
         assert!(!is_steam_title_updating(&library, 4));
         assert!(!downloading_folder_present(&library, 4));
         let _ = std::fs::remove_dir_all(&library);
+    }
+
+    fn temp_install(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "rusticgu-cheap-{tag}-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn steam_game_at(install_path: PathBuf, catalog: Option<u64>) -> SteamGame {
+        SteamGame {
+            app_id: 730,
+            name: "Counter-Strike 2".into(),
+            install_dir_name: "CS2".into(),
+            library_path: install_path.clone(),
+            install_path,
+            logical_bytes: catalog,
+            on_disk_bytes: None,
+            compacted: false,
+        }
+    }
+
+    #[test]
+    fn sizes_indicate_compacted_needs_five_percent_same_scope() {
+        assert!(sizes_indicate_compacted(Some(4), Some(10)));
+        assert!(!sizes_indicate_compacted(Some(20), Some(20)));
+        assert!(!sizes_indicate_compacted(Some(19), Some(20)));
+        assert!(sizes_indicate_compacted(Some(18), Some(20)));
+        assert!(!sizes_indicate_compacted(None, Some(10)));
+        assert!(!sizes_indicate_compacted(Some(126_000_000), None));
+        assert!(!sizes_indicate_compacted(Some(0), Some(0)));
+        assert!(!sizes_indicate_compacted(Some(1), Some(0)));
+        // This pairing is what the old sidebar used (SizeOnDisk vs one root file).
+        // The heuristic itself is true — fill_cheap_sizes must refuse to feed it.
+        assert!(sizes_indicate_compacted(Some(4_096), Some(40_000_000_000)));
+    }
+
+    #[test]
+    fn catalog_size_is_not_mixed_with_shallow_on_disk() {
+        let dir = temp_install("catalog");
+        fs::write(dir.join("steam_appid.txt"), b"730").unwrap();
+        fs::write(dir.join("game.exe"), vec![0u8; 64 * 1024]).unwrap();
+
+        let mut game = steam_game_at(dir.clone(), Some(40_000_000_000));
+        fill_cheap_sizes(&mut game);
+
+        assert_eq!(game.logical_bytes, Some(40_000_000_000));
+        assert_eq!(
+            game.on_disk_bytes, None,
+            "sampled on-disk must not pair with ACF SizeOnDisk"
+        );
+        assert!(
+            !game.compacted,
+            "uncompressed install files must not count as compacted against catalog size"
+        );
+
+        let title = crate::library::LibraryTitle::from_steam(game, None);
+        assert!(!title.is_compacted());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cheap_probe_includes_nested_files_on_the_same_set() {
+        let dir = temp_install("nested");
+        fs::create_dir_all(dir.join("bin")).unwrap();
+        fs::write(dir.join("bin").join("game.dll"), vec![0u8; 32 * 1024]).unwrap();
+
+        let (logical, on_disk) = cheap_install_sizes(&dir);
+        assert!(logical.unwrap() >= 32 * 1024);
+        assert!(on_disk.is_some());
+        assert!(
+            !sizes_indicate_compacted(on_disk, logical),
+            "uncompressed nested files must not look compacted"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_catalog_keeps_comparable_cheap_pair() {
+        let dir = temp_install("nocate");
+        fs::write(dir.join("game.exe"), vec![0u8; 8192]).unwrap();
+
+        let mut game = steam_game_at(dir.clone(), None);
+        fill_cheap_sizes(&mut game);
+
+        assert!(game.logical_bytes.is_some());
+        assert!(game.on_disk_bytes.is_some());
+        assert!(!game.compacted);
+        let logical = game.logical_bytes.unwrap();
+        let on_disk = game.on_disk_bytes.unwrap();
+        assert!(
+            on_disk.saturating_add(logical / 20) >= logical,
+            "uncompressed cheap pair must not trip the 5% heuristic"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }
