@@ -71,17 +71,13 @@ impl LibraryApp {
                                     format!("{} games", self.games.len())
                                 },
                             ))
-                            .when(selected_n > 0, |el| {
+                            .when_some(header_compact_label(selected_n), |el, label| {
                                 el.child(
                                     Button::new("library-compact-selected")
                                         .primary()
                                         .small()
                                         .icon(Icon::empty().path("icons/file-archive.svg"))
-                                        .label(if selected_n == 1 {
-                                            "Compress".into()
-                                        } else {
-                                            format!("Compress {selected_n}")
-                                        })
+                                        .label(label)
                                         .disabled(busy)
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.open_compact_level_dialog(window, cx);
@@ -235,6 +231,8 @@ fn render_poster_card(
     let monogram = Monogram::from_title(&game);
     let badge = game.store.badge();
     let excluded = title_is_compact_excluded(&game);
+    let compacted = game.is_compacted();
+    let hover_spec = poster_hover_spec(compacted, excluded);
     let poster_w = chrome.width;
     let poster_h = chrome.height;
     let selected = chrome.selected;
@@ -289,7 +287,10 @@ fn render_poster_card(
                             .object_fit(ObjectFit::Cover),
                     )
                 })
-                .child(render_play_veil(&id, group, busy || excluded, cx)),
+                .child(render_poster_veil(&id, group, hover_spec, busy, cx))
+                .when(poster_shows_compacted_badge(compacted, excluded), |el| {
+                    el.child(render_compacted_badge(&id, theme.foreground))
+                }),
         )
 }
 
@@ -331,44 +332,187 @@ fn render_monogram_tile(
         )
 }
 
-fn render_play_veil(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PosterHoverSpec {
+    show_compress: bool,
+    show_decompress: bool,
+    show_change_method: bool,
+    show_play: bool,
+    show_excluded_hint: bool,
+}
+
+fn poster_hover_spec(compacted: bool, excluded: bool) -> PosterHoverSpec {
+    if excluded {
+        PosterHoverSpec {
+            show_compress: false,
+            show_decompress: false,
+            show_change_method: false,
+            show_play: true,
+            show_excluded_hint: true,
+        }
+    } else if compacted {
+        PosterHoverSpec {
+            show_compress: false,
+            show_decompress: true,
+            show_change_method: true,
+            show_play: true,
+            show_excluded_hint: false,
+        }
+    } else {
+        PosterHoverSpec {
+            show_compress: true,
+            show_decompress: false,
+            show_change_method: false,
+            show_play: true,
+            show_excluded_hint: false,
+        }
+    }
+}
+
+fn poster_shows_compacted_badge(compacted: bool, excluded: bool) -> bool {
+    compacted && !excluded
+}
+
+fn header_compact_label(selected_n: usize) -> Option<String> {
+    (selected_n > 1).then(|| format!("Compress {selected_n}"))
+}
+
+fn render_compacted_badge(id: &str, fg: gpui::Hsla) -> impl IntoElement {
+    h_flex()
+        .id(SharedString::from(format!("poster-compacted-{id}")))
+        .absolute()
+        .top(px(8.))
+        .left(px(8.))
+        .items_center()
+        .gap_1()
+        .px_1p5()
+        .py_0p5()
+        .rounded(px(6.))
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.62))
+        .child(
+            Icon::empty()
+                .path("icons/file-archive.svg")
+                .with_size(px(11.))
+                .text_color(fg),
+        )
+        .child(div().text_xs().text_color(fg).child("Compacted"))
+}
+
+fn render_poster_veil(
     id: &str,
     group: SharedString,
-    disabled: bool,
+    spec: PosterHoverSpec,
+    busy: bool,
     cx: &mut Context<LibraryApp>,
 ) -> impl IntoElement {
+    let theme = cx.theme().clone();
     let id = id.to_string();
     // Stay mounted and do not occlude: inserting an occluding veil on hover
-    // steals the card hitbox, which drops hover and flickers the Play button.
+    // steals the card hitbox, which drops hover and flickers the actions.
     v_flex()
         .id(SharedString::from(format!("poster-veil-{id}")))
         .absolute()
         .inset_0()
-        .items_center()
-        .justify_center()
-        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.46))
+        .justify_end()
+        .p_2()
+        .gap_1p5()
+        .bg(gpui::hsla(0.0, 0.0, 0.0, 0.52))
         .invisible()
         .group_hover(group, |s| s.visible())
-        .child(
-            Button::new(SharedString::from(format!("poster-launch-{id}")))
-                .primary()
-                .small()
-                .icon(Icon::empty().path("icons/play.svg"))
-                .label("Play")
-                .disabled(disabled)
-                .on_click({
-                    let id = id.clone();
-                    cx.listener(move |this, _, window, cx| {
-                        this.select_game(id.clone(), cx);
-                        this.launch_selected(window, cx);
-                    })
-                }),
-        )
+        .when(spec.show_excluded_hint, |el| {
+            el.child(
+                div()
+                    .w_full()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Excluded from compact"),
+            )
+        })
+        .when(spec.show_compress, |el| {
+            el.child(
+                Button::new(SharedString::from(format!("poster-compress-{id}")))
+                    .primary()
+                    .small()
+                    .compact()
+                    .w_full()
+                    .icon(Icon::empty().path("icons/file-archive.svg"))
+                    .label("Compress")
+                    .tooltip("Compress this title")
+                    .disabled(busy)
+                    .on_click({
+                        let id = id.clone();
+                        cx.listener(move |this, _, window, cx| {
+                            this.begin_title_compress(id.clone(), window, cx);
+                        })
+                    }),
+            )
+        })
+        .when(spec.show_decompress, |el| {
+            el.child(
+                Button::new(SharedString::from(format!("poster-decompress-{id}")))
+                    .outline()
+                    .small()
+                    .compact()
+                    .w_full()
+                    .icon(Icon::empty().path("icons/undo-2.svg"))
+                    .label("Decompress")
+                    .tooltip("Restore uncompressed files")
+                    .disabled(busy)
+                    .on_click({
+                        let id = id.clone();
+                        cx.listener(move |this, _, window, cx| {
+                            this.begin_title_decompress(id.clone(), window, cx);
+                        })
+                    }),
+            )
+        })
+        .when(spec.show_change_method, |el| {
+            el.child(
+                Button::new(SharedString::from(format!("poster-change-{id}")))
+                    .primary()
+                    .small()
+                    .compact()
+                    .w_full()
+                    .icon(Icon::empty().path("icons/redo-2.svg"))
+                    .label("Change")
+                    .tooltip("Change compression method")
+                    .disabled(busy)
+                    .on_click({
+                        let id = id.clone();
+                        cx.listener(move |this, _, window, cx| {
+                            this.begin_title_change_method(id.clone(), window, cx);
+                        })
+                    }),
+            )
+        })
+        .when(spec.show_play, |el| {
+            el.child(
+                Button::new(SharedString::from(format!("poster-launch-{id}")))
+                    .outline()
+                    .small()
+                    .compact()
+                    .w_full()
+                    .icon(Icon::empty().path("icons/play.svg"))
+                    .label("Play")
+                    .tooltip("Play")
+                    .disabled(busy)
+                    .on_click({
+                        let id = id.clone();
+                        cx.listener(move |this, _, window, cx| {
+                            this.select_game(id.clone(), cx);
+                            this.launch_selected(window, cx);
+                        })
+                    }),
+            )
+        })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{poster_size, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM};
+    use super::{
+        header_compact_label, poster_hover_spec, poster_shows_compacted_badge, poster_size,
+        POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
+    };
     use crate::settings::UiDensity;
 
     #[test]
@@ -381,5 +525,45 @@ mod tests {
         assert!((8.0..=12.0).contains(&POSTER_RADIUS));
         assert!((6.0..=10.0).contains(&POSTER_GAP));
         assert!((UNSELECTED_DIM - 0.6).abs() < 0.001);
+    }
+
+    #[test]
+    fn uncompacted_hover_leads_with_compress() {
+        let spec = poster_hover_spec(false, false);
+        assert!(spec.show_compress);
+        assert!(spec.show_play);
+        assert!(!spec.show_decompress);
+        assert!(!spec.show_change_method);
+        assert!(!spec.show_excluded_hint);
+        assert!(!poster_shows_compacted_badge(false, false));
+    }
+
+    #[test]
+    fn compacted_hover_offers_decompress_and_change() {
+        let spec = poster_hover_spec(true, false);
+        assert!(!spec.show_compress);
+        assert!(spec.show_decompress);
+        assert!(spec.show_change_method);
+        assert!(spec.show_play);
+        assert!(poster_shows_compacted_badge(true, false));
+        assert!(!poster_shows_compacted_badge(true, true));
+    }
+
+    #[test]
+    fn excluded_hover_is_play_only() {
+        let spec = poster_hover_spec(true, true);
+        assert!(!spec.show_compress);
+        assert!(!spec.show_decompress);
+        assert!(!spec.show_change_method);
+        assert!(spec.show_play);
+        assert!(spec.show_excluded_hint);
+    }
+
+    #[test]
+    fn header_compress_is_batch_only() {
+        assert_eq!(header_compact_label(0), None);
+        assert_eq!(header_compact_label(1), None);
+        assert_eq!(header_compact_label(2).as_deref(), Some("Compress 2"));
+        assert_eq!(header_compact_label(5).as_deref(), Some("Compress 5"));
     }
 }
