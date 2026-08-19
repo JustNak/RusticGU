@@ -192,7 +192,7 @@ GitHub Actions workflows live in `.github/workflows/`:
 | --- | --- | --- |
 | **CI** (`ci.yml`) | Push / PR to `main` | `cargo fmt` check, `clippy`, `test` on Windows |
 | **Release** (`release.yml`) | Tag `v*` except `v*-nightly.*` | Build Windows NSIS installer + zip; publish a **Stable** GitHub Release |
-| **Nightly** (`nightly.yml`) | Manual **Run workflow** only | Same installer + zip as Release, stamped `X.Y.Z-nightly.YYYYMMDDHHMMSS`, published as a GitHub **pre-release** (`make_latest: false`) |
+| **Nightly** (`nightly.yml`) | Manual **Run workflow** only | Same installer + zip as Release, stamped `X.Y.Z-nightly.YYYYMMDDHHMMSS`, published as a GitHub **pre-release** (`make_latest: false`). Skips when that commit already has a nightly. Keeps the last 14 nightlies. |
 
 ---
 
