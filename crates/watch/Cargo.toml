@@ -6,6 +6,9 @@ description = "Live Compact watcher: poll Steam ACF/download state and decide wh
 license = "MIT"
 publish = false
 
+# Standalone crate: do not join the repo-root workspace (Engineer 3 owns that).
+[workspace]
+
 [dependencies]
 thiserror = "1"
 
