@@ -507,6 +507,14 @@ mod tests {
     }
 
     #[test]
+    fn live_settings_picker_is_xpress_only() {
+        let labels: Vec<&'static str> = CompactAlgorithm::LIVE.iter().map(|a| a.label()).collect();
+        assert_eq!(labels, ["XPRESS4K", "XPRESS8K", "XPRESS16K"]);
+        assert!(!labels.contains(&"LZX"));
+        assert_eq!(Settings::default().compact_algorithm.label(), "XPRESS8K");
+    }
+
+    #[test]
     fn legacy_json_without_new_fields_deserializes() {
         let json = r#"{
             "theme": "light",

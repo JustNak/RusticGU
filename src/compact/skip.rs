@@ -246,6 +246,17 @@ fn walk_all_files(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
     out
 }
 
+/// Same include set for dry-run/estimate and the real WOF apply pass.
+pub const COMPACT_WALK_DEPTH: usize = 24;
+
+/// Files the WOF pass may touch: skip-list directories pruned, skip extensions dropped.
+pub fn collect_included_files(root: &Path) -> Vec<std::path::PathBuf> {
+    walkdir_limited(root, COMPACT_WALK_DEPTH)
+        .into_iter()
+        .filter(|path| !should_skip(path))
+        .collect()
+}
+
 /// Bounded walk so tests and dry-run stay cheap. Production compact also uses this.
 pub fn walkdir_limited(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
@@ -477,5 +488,32 @@ mod tests {
         assert!(!should_skip(&PathBuf::from(
             r"C:\games\Foo\engine\renderer.dll"
         )));
+    }
+
+    #[test]
+    fn collect_included_files_matches_skip_list() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("rusticgu-include-{}-{}", std::process::id(), stamp));
+        std::fs::create_dir_all(root.join("ShaderCache")).unwrap();
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        std::fs::write(root.join("data").join("level.dat"), b"d").unwrap();
+        std::fs::write(root.join("albedo.dds"), b"dds").unwrap();
+        std::fs::write(root.join("clip.mkv"), b"mkv").unwrap();
+        std::fs::write(root.join("ShaderCache").join("pso.bin"), b"p").unwrap();
+
+        let included = collect_included_files(&root);
+        let names: Vec<String> = included
+            .iter()
+            .filter_map(|p| p.file_name()?.to_str().map(|s| s.to_string()))
+            .collect();
+        assert!(names.contains(&"level.dat".into()));
+        assert!(names.contains(&"albedo.dds".into()));
+        assert!(!names.iter().any(|n| n == "clip.mkv" || n == "pso.bin"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

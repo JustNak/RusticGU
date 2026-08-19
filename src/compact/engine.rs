@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 
 use crate::settings::CompactAlgorithm;
 
-use super::command::{build_compact_command, CompactOp};
-use super::skip::{auto_excluded_title, should_skip, tree_contains_dstorage, walkdir_limited};
+use crate::library::install_is_steam_updating;
+
+use super::command::{build_apply_invocations, build_compact_command, CompactOp};
+use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
 const XPRESS8K_RATIO: f64 = 0.62;
@@ -17,6 +19,7 @@ pub enum CompactRefuse {
     RunningExecutable { path: PathBuf },
     DirectStorage { override_allowed: bool },
     AutoExcluded { title: String },
+    SteamUpdating,
     UnsupportedOs,
     NotNtfs { filesystem: String },
     MissingFolder,
@@ -50,6 +53,10 @@ impl std::fmt::Display for CompactRefuse {
             Self::AutoExcluded { title } => {
                 write!(f, "{title} is auto-excluded from compact.")
             }
+            Self::SteamUpdating => write!(
+                f,
+                "Steam is updating this title. Compact is blocked until the update finishes."
+            ),
             Self::UnsupportedOs => {
                 write!(
                     f,
@@ -102,16 +109,12 @@ pub fn estimate_compact(
     if !root.is_dir() {
         return Err("Game folder is missing.".into());
     }
-    let files = walkdir_limited(root, 24);
-    let mut file_count = 0usize;
-    let mut skipped_count = 0usize;
+    let walked = super::skip::walkdir_limited(root, super::skip::COMPACT_WALK_DEPTH);
+    let included = collect_included_files(root);
+    let file_count = included.len();
+    let skipped_count = walked.len().saturating_sub(file_count);
     let mut logical_bytes = 0u64;
-    for path in &files {
-        if should_skip(path) {
-            skipped_count += 1;
-            continue;
-        }
-        file_count += 1;
+    for path in &included {
         if let Ok(meta) = std::fs::metadata(path) {
             logical_bytes = logical_bytes.saturating_add(meta.len());
         }
@@ -165,6 +168,9 @@ pub fn preflight(root: &Path, allow_dstorage: bool) -> Result<(), CompactRefuse>
         return Err(CompactRefuse::DirectStorage {
             override_allowed: false,
         });
+    }
+    if install_is_steam_updating(root) {
+        return Err(CompactRefuse::SteamUpdating);
     }
     Ok(())
 }
@@ -342,23 +348,58 @@ pub fn apply_compact(
         },
     });
 
-    let inv = build_compact_command(op, root, algorithm);
-    let output = run_compact(&inv, false)?;
-    if is_access_denied(&output) {
-        progress(CompactProgress {
-            processed: 0,
-            total: estimate.file_count.max(1),
-            message: "Access denied — retrying elevated…".into(),
+    let invocations = build_apply_invocations(op, root, algorithm);
+    if invocations.is_empty() {
+        return Ok(CompactResult {
+            ok: true,
+            message: "Nothing to compact (skip list excluded every file).".into(),
         });
-        let output = run_compact(&inv, true)?;
-        return interpret_output(op, output);
     }
+
+    let total = estimate.file_count.max(1);
+    let mut elevate = false;
+    let mut processed = 0usize;
+    let mut last_output = CommandOutput {
+        status_ok: true,
+        stdout: String::new(),
+        stderr: String::new(),
+        code: Some(0),
+    };
+
+    for inv in &invocations {
+        let file_n = inv
+            .args
+            .iter()
+            .filter(|a| !a.to_string_lossy().starts_with('/'))
+            .count();
+        let mut output = run_compact(inv, elevate)?;
+        if is_access_denied(&output) && !elevate {
+            progress(CompactProgress {
+                processed,
+                total,
+                message: "Access denied — retrying elevated…".into(),
+            });
+            elevate = true;
+            output = run_compact(inv, true)?;
+        }
+        if !output.status_ok && !is_access_denied(&output) {
+            return interpret_output(op, output);
+        }
+        processed = processed.saturating_add(file_n);
+        progress(CompactProgress {
+            processed: processed.min(total),
+            total,
+            message: format!("WOF /EXE {processed}/{total}…"),
+        });
+        last_output = output;
+    }
+
     progress(CompactProgress {
-        processed: estimate.file_count.max(1),
-        total: estimate.file_count.max(1),
+        processed: total,
+        total,
         message: "Finished.".into(),
     });
-    interpret_output(op, output)
+    interpret_output(op, last_output)
 }
 
 struct CommandOutput {
@@ -569,5 +610,93 @@ mod tests {
         );
         assert!(is_wof_exe_command(&inv));
         assert!(!is_lznt1_command(&inv));
+        let line = inv.display_cmdline().to_ascii_uppercase();
+        assert!(!line.contains("/S"), "{line}");
+    }
+
+    #[test]
+    fn apply_uses_include_set_not_recursive_root() {
+        use crate::compact::command::{
+            apply_target_paths, build_apply_invocations, invocation_recurses_install_root,
+        };
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-apply-engine-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(root.join("SaveGames")).unwrap();
+        std::fs::write(root.join("play.exe"), vec![0u8; 64]).unwrap();
+        std::fs::write(root.join("cut.mp4"), vec![0u8; 64]).unwrap();
+        std::fs::write(root.join("SaveGames").join("x.sav"), b"s").unwrap();
+
+        let invs = build_apply_invocations(CompactOp::Compress, &root, CompactAlgorithm::Xpress8k);
+        assert!(!invs.is_empty());
+        for inv in &invs {
+            assert!(!invocation_recurses_install_root(inv, &root));
+            let line = inv.display_cmdline().to_ascii_uppercase();
+            assert!(!line.contains("/S"), "{line}");
+            assert!(!line.contains("CUT.MP4"), "{line}");
+            assert!(!line.contains("SAVEGAMES"), "{line}");
+            assert!(is_wof_exe_command(inv));
+        }
+        let targets = apply_target_paths(&root);
+        assert_eq!(targets.len(), 1);
+        assert_eq!(
+            targets[0].file_name().and_then(|n| n.to_str()),
+            Some("play.exe")
+        );
+
+        let result = apply_compact(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Xpress8k,
+            false,
+            |_| {},
+        )
+        .unwrap();
+        assert!(result.ok);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn preflight_refuses_steam_updating_title() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let library = std::env::temp_dir().join(format!(
+            "rusticgu-preflight-upd-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        let install = library.join("steamapps").join("common").join("BarGame");
+        std::fs::create_dir_all(&install).unwrap();
+        std::fs::write(install.join("game.exe"), b"exe").unwrap();
+        std::fs::write(
+            library.join("steamapps").join("appmanifest_99.acf"),
+            r#"
+"AppState"
+{
+	"appid"		"99"
+	"name"		"Bar Game"
+	"StateFlags"		"4"
+	"installdir"		"BarGame"
+}
+"#,
+        )
+        .unwrap();
+        assert!(preflight(&install, false).is_ok());
+
+        std::fs::create_dir_all(library.join("steamapps").join("downloading").join("99")).unwrap();
+        let err = preflight(&install, false).unwrap_err();
+        assert_eq!(err, CompactRefuse::SteamUpdating);
+
+        let _ = std::fs::remove_dir_all(&library);
     }
 }

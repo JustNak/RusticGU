@@ -7,7 +7,11 @@ mod steam;
 mod vdf;
 
 #[allow(unused_imports)]
-pub use steam::{collect_library_folders, game_from_acf, library_paths_from_vdf, steam_path};
+pub use steam::{
+    collect_library_folders, downloading_folder_present, game_from_acf, install_is_steam_updating,
+    library_paths_from_vdf, state_flags_from_acf, state_flags_indicate_update, steam_path,
+    steam_title_is_updating,
+};
 pub use steam::{scan_steam_library, SteamGame};
 #[allow(unused_imports)]
 pub use vdf::{parse_vdf, VdfObject, VdfValue};

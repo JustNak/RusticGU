@@ -5,6 +5,36 @@ use std::path::{Path, PathBuf};
 
 use super::vdf::{lookup_object, lookup_str, parse_vdf, VdfObject};
 
+/// SteamKit `EAppState` bits that mean a title is mid-update / validate / download.
+/// `FullyInstalled` (4) and `UpdateRequired` (2) alone are not mid-update.
+const STATE_UPDATE_RUNNING: u32 = 256;
+const STATE_UPDATE_PAUSED: u32 = 512;
+const STATE_UPDATE_STARTED: u32 = 1024;
+const STATE_UNINSTALLING: u32 = 2048;
+const STATE_BACKUP_RUNNING: u32 = 4096;
+const STATE_RECONFIGURING: u32 = 65_536;
+const STATE_VALIDATING: u32 = 131_072;
+const STATE_ADDING_FILES: u32 = 262_144;
+const STATE_PREALLOCATING: u32 = 524_288;
+const STATE_DOWNLOADING: u32 = 1_048_576;
+const STATE_STAGING: u32 = 2_097_152;
+const STATE_COMMITTING: u32 = 4_194_304;
+const STATE_UPDATE_STOPPING: u32 = 8_388_608;
+
+const STATE_MID_UPDATE_MASK: u32 = STATE_UPDATE_RUNNING
+    | STATE_UPDATE_PAUSED
+    | STATE_UPDATE_STARTED
+    | STATE_UNINSTALLING
+    | STATE_BACKUP_RUNNING
+    | STATE_RECONFIGURING
+    | STATE_VALIDATING
+    | STATE_ADDING_FILES
+    | STATE_PREALLOCATING
+    | STATE_DOWNLOADING
+    | STATE_STAGING
+    | STATE_COMMITTING
+    | STATE_UPDATE_STOPPING;
+
 /// One installed Steam game resolved from an appmanifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SteamGame {
@@ -303,6 +333,91 @@ fn normalize_vdf_path(path: &str) -> String {
     path.replace("\\\\", "\\")
 }
 
+/// True when `StateFlags` means Steam is actively changing that title.
+pub fn state_flags_indicate_update(flags: u32) -> bool {
+    flags & STATE_MID_UPDATE_MASK != 0
+}
+
+/// `steamapps/downloading/<appid>` exists (directory or file).
+pub fn downloading_folder_present(library_path: &Path, app_id: u32) -> bool {
+    library_path
+        .join("steamapps")
+        .join("downloading")
+        .join(app_id.to_string())
+        .exists()
+}
+
+pub fn appmanifest_path(library_path: &Path, app_id: u32) -> PathBuf {
+    library_path
+        .join("steamapps")
+        .join(format!("appmanifest_{app_id}.acf"))
+}
+
+/// Read `StateFlags` from an appmanifest ACF body.
+pub fn state_flags_from_acf(text: &str) -> Option<u32> {
+    let root = parse_vdf(text).ok()?;
+    let state = lookup_object(&root, "AppState").unwrap_or(&root);
+    lookup_str(state, "StateFlags")?.parse().ok()
+}
+
+/// True when Steam is mid-update for this app (downloading folder or StateFlags).
+pub fn steam_title_is_updating(library_path: &Path, app_id: u32) -> bool {
+    if downloading_folder_present(library_path, app_id) {
+        return true;
+    }
+    let acf = appmanifest_path(library_path, app_id);
+    let Ok(text) = fs::read_to_string(acf) else {
+        return false;
+    };
+    state_flags_from_acf(&text).is_some_and(state_flags_indicate_update)
+}
+
+/// If `install_path` is `…/steamapps/common/<dir>`, resolve its library + appid.
+pub fn steam_context_from_install(install_path: &Path) -> Option<(PathBuf, u32)> {
+    let common = install_path.parent()?;
+    if !common
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("common"))
+    {
+        return None;
+    }
+    let steamapps = common.parent()?;
+    if !steamapps
+        .file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("steamapps"))
+    {
+        return None;
+    }
+    let library_path = steamapps.parent()?.to_path_buf();
+    let install_dir = install_path.file_name()?.to_string_lossy();
+    let entries = fs::read_dir(steamapps).ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("appmanifest_") || !name.ends_with(".acf") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Some(game) = game_from_acf(&text, &library_path) else {
+            continue;
+        };
+        if game.install_dir_name.eq_ignore_ascii_case(&install_dir) {
+            return Some((library_path, game.app_id));
+        }
+    }
+    None
+}
+
+/// True when this install folder belongs to a Steam title that is mid-update.
+pub fn install_is_steam_updating(install_path: &Path) -> bool {
+    match steam_context_from_install(install_path) {
+        Some((library, app_id)) => steam_title_is_updating(&library, app_id),
+        None => false,
+    }
+}
+
 fn push_unique(folders: &mut Vec<PathBuf>, path: PathBuf) {
     let key = normalize_for_cmp(&path);
     if folders
@@ -384,5 +499,96 @@ mod tests {
 }
 "#;
         assert!(game_from_acf(acf, Path::new(r"C:\Steam")).is_none());
+    }
+
+    #[test]
+    fn state_flags_idle_fully_installed_is_not_updating() {
+        assert!(!state_flags_indicate_update(4));
+        assert!(!state_flags_indicate_update(4 | 2));
+        assert!(!state_flags_indicate_update(0));
+    }
+
+    #[test]
+    fn state_flags_mid_update_bits_are_detected() {
+        assert!(state_flags_indicate_update(STATE_UPDATE_RUNNING));
+        assert!(state_flags_indicate_update(STATE_UPDATE_STARTED));
+        assert!(state_flags_indicate_update(STATE_DOWNLOADING));
+        assert!(state_flags_indicate_update(4 | STATE_UPDATE_RUNNING));
+        assert!(state_flags_indicate_update(STATE_VALIDATING));
+        assert!(state_flags_from_acf(
+            r#"
+"AppState"
+{
+	"appid"		"730"
+	"StateFlags"		"256"
+	"installdir"		"Counter-Strike Global Offensive"
+}
+"#
+        )
+        .is_some_and(state_flags_indicate_update));
+        assert!(!state_flags_from_acf(
+            r#"
+"AppState"
+{
+	"appid"		"730"
+	"StateFlags"		"4"
+	"installdir"		"Counter-Strike Global Offensive"
+}
+"#
+        )
+        .is_some_and(state_flags_indicate_update));
+    }
+
+    #[test]
+    fn downloading_folder_and_acf_flags_block_compact() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let library = std::env::temp_dir().join(format!(
+            "rusticgu-steam-upd-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        let common = library.join("steamapps").join("common").join("FooGame");
+        std::fs::create_dir_all(&common).unwrap();
+        std::fs::write(common.join("game.exe"), b"exe").unwrap();
+
+        let idle_acf = r#"
+"AppState"
+{
+	"appid"		"4242"
+	"name"		"Foo Game"
+	"StateFlags"		"4"
+	"installdir"		"FooGame"
+}
+"#;
+        std::fs::write(appmanifest_path(&library, 4242), idle_acf).unwrap();
+        assert!(!steam_title_is_updating(&library, 4242));
+        assert!(!install_is_steam_updating(&common));
+        assert!(!downloading_folder_present(&library, 4242));
+
+        let downloading = library.join("steamapps").join("downloading").join("4242");
+        std::fs::create_dir_all(&downloading).unwrap();
+        assert!(downloading_folder_present(&library, 4242));
+        assert!(steam_title_is_updating(&library, 4242));
+        assert!(install_is_steam_updating(&common));
+        let _ = std::fs::remove_dir_all(&downloading);
+        assert!(!steam_title_is_updating(&library, 4242));
+
+        let updating_acf = r#"
+"AppState"
+{
+	"appid"		"4242"
+	"name"		"Foo Game"
+	"StateFlags"		"1048576"
+	"installdir"		"FooGame"
+}
+"#;
+        std::fs::write(appmanifest_path(&library, 4242), updating_acf).unwrap();
+        assert!(steam_title_is_updating(&library, 4242));
+        assert!(install_is_steam_updating(&common));
+
+        let _ = std::fs::remove_dir_all(&library);
     }
 }
