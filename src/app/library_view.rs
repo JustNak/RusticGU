@@ -32,7 +32,6 @@ impl LibraryApp {
         let error = self.library_error.clone();
         let progress = self.compact_progress.clone();
         let busy = self.compact_busy;
-        let hovered = self.hovered_id.clone();
         let filter = self.filter;
         let selected_n = self.selected_titles().len();
 
@@ -152,14 +151,12 @@ impl LibraryApp {
                             .children(games.into_iter().map(|game| {
                                 let id = game.id.clone();
                                 let is_selected = selected.contains(&id);
-                                let is_hovered = hovered.as_deref() == Some(id.as_str());
                                 let cover = self.cover_image(&id);
                                 render_poster_card(
                                     game,
                                     cover,
                                     PosterChrome {
                                         selected: is_selected,
-                                        hovered: is_hovered,
                                         busy,
                                         width: poster_w,
                                         height: poster_h,
@@ -218,7 +215,6 @@ fn card_dom_id(id: &str) -> SharedString {
 
 struct PosterChrome {
     selected: bool,
-    hovered: bool,
     busy: bool,
     width: f32,
     height: f32,
@@ -242,29 +238,15 @@ fn render_poster_card(
     let poster_w = chrome.width;
     let poster_h = chrome.height;
     let selected = chrome.selected;
-    let hovered = chrome.hovered;
     let busy = chrome.busy;
-    let dim = if selected || hovered {
-        1.0
-    } else {
-        UNSELECTED_DIM
-    };
+    let group = card_dom_id(&id);
 
     v_flex()
-        .id(card_dom_id(&id))
+        .id(group.clone())
+        .group(group.clone())
         .w(px(poster_w))
-        .opacity(dim)
-        .on_hover({
-            let id = id.clone();
-            cx.listener(move |this, hovering: &bool, _, cx| {
-                if *hovering {
-                    this.hovered_id = Some(id.clone());
-                } else if this.hovered_id.as_deref() == Some(id.as_str()) {
-                    this.hovered_id = None;
-                }
-                cx.notify();
-            })
-        })
+        .opacity(if selected { 1.0 } else { UNSELECTED_DIM })
+        .when(!selected, |el| el.hover(|s| s.opacity(1.0)))
         .child(
             div()
                 .id(SharedString::from(format!("poster-art-{id}")))
@@ -307,9 +289,7 @@ fn render_poster_card(
                             .object_fit(ObjectFit::Cover),
                     )
                 })
-                .when(hovered, |el| {
-                    el.child(render_play_veil(&id, busy || excluded, cx))
-                }),
+                .child(render_play_veil(&id, group, busy || excluded, cx)),
         )
 }
 
@@ -351,8 +331,15 @@ fn render_monogram_tile(
         )
 }
 
-fn render_play_veil(id: &str, disabled: bool, cx: &mut Context<LibraryApp>) -> impl IntoElement {
+fn render_play_veil(
+    id: &str,
+    group: SharedString,
+    disabled: bool,
+    cx: &mut Context<LibraryApp>,
+) -> impl IntoElement {
     let id = id.to_string();
+    // Stay mounted and do not occlude: inserting an occluding veil on hover
+    // steals the card hitbox, which drops hover and flickers the Play button.
     v_flex()
         .id(SharedString::from(format!("poster-veil-{id}")))
         .absolute()
@@ -360,7 +347,8 @@ fn render_play_veil(id: &str, disabled: bool, cx: &mut Context<LibraryApp>) -> i
         .items_center()
         .justify_center()
         .bg(gpui::hsla(0.0, 0.0, 0.0, 0.46))
-        .occlude()
+        .invisible()
+        .group_hover(group, |s| s.visible())
         .child(
             Button::new(SharedString::from(format!("poster-launch-{id}")))
                 .primary()
