@@ -8,7 +8,8 @@ mod vdf;
 
 #[allow(unused_imports)]
 pub use steam::{
-    appmanifest_path, cheap_install_sizes, scan_library_folder, scan_steam_library, SteamGame,
+    appmanifest_path, cheap_install_sizes, scan_library_folder, scan_steam_library,
+    sizes_indicate_compacted, SteamGame,
 };
 #[allow(unused_imports)]
 pub use steam::{

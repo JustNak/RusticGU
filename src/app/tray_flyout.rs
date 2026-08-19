@@ -612,6 +612,7 @@ mod tests {
             last_played_unix: None,
             logical_bytes: if compacted { Some(10) } else { Some(20) },
             on_disk_bytes: if compacted { Some(4) } else { Some(20) },
+            compacted,
             steam_app_id: app_id,
             steam_library_path: None,
             steam_install_dir_name: None,

@@ -136,6 +136,7 @@ mod tests {
             library_path: PathBuf::from(r"D:\Steam"),
             logical_bytes: Some(1_000),
             on_disk_bytes: Some(1_000),
+            compacted: false,
         }
     }
 
