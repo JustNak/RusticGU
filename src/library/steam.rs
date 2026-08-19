@@ -60,7 +60,6 @@ pub fn steam_path() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn registry_steam_path() -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::ERROR_SUCCESS;
     use windows::Win32::System::Registry::{
@@ -113,6 +112,7 @@ fn registry_steam_path() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn wide(s: &str) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
     std::ffi::OsStr::new(s)
         .encode_wide()
         .chain(std::iter::once(0))

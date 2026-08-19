@@ -289,7 +289,7 @@ fn windows_running_exe_in_tree(root: &Path) -> Option<PathBuf> {
             continue;
         };
         let mut buf = [0u16; 520];
-        let len = unsafe { K32GetModuleFileNameExW(handle, None, &mut buf) };
+        let len = unsafe { K32GetModuleFileNameExW(Some(handle), None, &mut buf) };
         unsafe {
             let _ = CloseHandle(handle);
         }
