@@ -93,27 +93,19 @@ pub fn default_denylist() -> DenyList {
     DenyList {
         rules: vec![
             DenyRule {
-                reason: "Guild Wars 2 ArenaNet self-rewriter (Gw2-64 / local.dat)"
-                    .into(),
+                reason: "Guild Wars 2 ArenaNet self-rewriter (Gw2-64 / local.dat)".into(),
                 names: vec!["Guild Wars 2".into(), "GW2".into()],
                 ids: vec!["1284210".into(), "steam:1284210".into()],
                 folder_markers: vec!["Guild Wars 2".into(), "Gw2".into(), "GW2".into()],
             },
             DenyRule {
                 reason: "Secret World Legends Funcom self-updating client".into(),
-                names: vec![
-                    "Secret World Legends".into(),
-                    "The Secret World".into(),
-                ],
+                names: vec!["Secret World Legends".into(), "The Secret World".into()],
                 ids: vec!["376480".into(), "steam:376480".into()],
-                folder_markers: vec![
-                    "Secret World Legends".into(),
-                    "SecretWorldLegends".into(),
-                ],
+                folder_markers: vec!["Secret World Legends".into(), "SecretWorldLegends".into()],
             },
             DenyRule {
-                reason: "LOTRO patcher freezes on WOF-compressed files; decompress to patch"
-                    .into(),
+                reason: "LOTRO patcher freezes on WOF-compressed files; decompress to patch".into(),
                 names: vec![
                     "The Lord of the Rings Online".into(),
                     "Lord of the Rings Online".into(),
@@ -138,9 +130,7 @@ mod tests {
     #[test]
     fn gw2_name_is_case_insensitive() {
         let d = default_denylist();
-        assert!(d
-            .match_title("guild wars 2", None, None, None)
-            .is_some());
+        assert!(d.match_title("guild wars 2", None, None, None).is_some());
         assert!(d.match_title("GW2", None, None, None).is_some());
         assert!(d
             .match_title("Hades", None, None, Some(Path::new(r"C:\Games\Hades")))
@@ -150,7 +140,9 @@ mod tests {
     #[test]
     fn ark_and_eso_are_not_default_excluded() {
         let d = default_denylist();
-        assert!(d.match_title("ARK: Survival Evolved", None, None, None).is_none());
+        assert!(d
+            .match_title("ARK: Survival Evolved", None, None, None)
+            .is_none());
         assert!(d.match_title("ARK", None, None, None).is_none());
         assert!(d
             .match_title("The Elder Scrolls Online", None, None, None)

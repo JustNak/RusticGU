@@ -25,6 +25,7 @@ impl LibraryApp {
         let update_label = self.update_action_label();
         let algorithm = self.settings.compact_algorithm;
         let allow_dstorage = self.settings.allow_dstorage_override;
+        let include_xbox = self.settings.include_xbox_games;
 
         GroupBox::new().outline().child(
             v_flex()
@@ -72,7 +73,7 @@ impl LibraryApp {
                 .child(settings_subgroup("Compact", true, cx))
                 .child(settings_choice_row(
                     "WOF algorithm",
-                    Some("Always compact /EXE. Default XPRESS8K. LZX is Shelf only (later) and is not selectable here."),
+                    Some("Always compact /EXE. Default XPRESS8K. LZX is Shelf only and is not selectable here."),
                     h_flex().gap_2().children(CompactAlgorithm::LIVE.into_iter().map(|algo| {
                         let selected = algorithm == algo;
                         Button::new(SharedString::from(format!("algo-{}", algo.label())))
@@ -99,6 +100,7 @@ impl LibraryApp {
                                 .when(allow_dstorage, |b| b.outline())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.settings.allow_dstorage_override = false;
+                                    this.live.set_allow_dstorage(false);
                                     cx.notify();
                                 })),
                         )
@@ -109,7 +111,33 @@ impl LibraryApp {
                                 .when(!allow_dstorage, |b| b.outline())
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.settings.allow_dstorage_override = true;
+                                    this.live.set_allow_dstorage(true);
                                     cx.notify();
+                                })),
+                        ),
+                    cx,
+                ))
+                .child(settings_choice_row(
+                    "Include XboxGames / GDK",
+                    Some("Off by default. Opt-in only. Never scans WindowsApps."),
+                    h_flex()
+                        .gap_2()
+                        .child(
+                            Button::new("xbox-off")
+                                .label("Off")
+                                .when(!include_xbox, |b| b.primary())
+                                .when(include_xbox, |b| b.outline())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_include_xbox_games(false, cx);
+                                })),
+                        )
+                        .child(
+                            Button::new("xbox-on")
+                                .label("On")
+                                .when(include_xbox, |b| b.primary())
+                                .when(!include_xbox, |b| b.outline())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.set_include_xbox_games(true, cx);
                                 })),
                         ),
                     cx,

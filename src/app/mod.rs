@@ -33,15 +33,20 @@ use crate::appearance::{
     apply_appearance, film_grain_image, noise_enabled, vignette_edge_alpha, vignette_enabled,
 };
 use crate::compact::{
-    apply_compact, estimate_compact, path_is_auto_excluded, preflight, title_is_auto_excluded,
+    apply_compact, apply_compact_allowing_lzx, estimate_compact, estimate_compact_with, preflight,
     CompactOp, CompactProgress, CompactRefuse,
 };
-use crate::library::{scan_steam_library, SteamGame};
+use crate::library::{
+    algorithm_from_policy, scan_library, shelf_policy_for, steam_title_id,
+    title_is_compact_excluded, LibraryTitle,
+};
+use crate::live::LiveHandle;
 use crate::notifications::notify_compact;
 use crate::persistence::{
     load_pending_whats_new, load_state, save_settings, save_state, AppPaths, AppState,
     PendingWhatsNew,
 };
+use crate::settings::CompactAlgorithm;
 use crate::settings::{Settings, WindowLayout};
 use crate::startup::launched_minimized;
 use crate::tray::SystemTray;
@@ -50,13 +55,13 @@ use toast::Toast;
 use widgets::render_vignette_overlay;
 
 pub struct LibraryApp {
-    pub(crate) games: Vec<SteamGame>,
+    pub(crate) games: Vec<LibraryTitle>,
     pub(crate) settings: Settings,
     pub(crate) paths: AppPaths,
     pub(crate) filter: FilterKind,
     pub(crate) settings_return_filter: FilterKind,
     pub(crate) settings_category: SettingsCategory,
-    pub(crate) selected_app_id: Option<u32>,
+    pub(crate) selected_id: Option<String>,
     pub(crate) library_scanning: bool,
     pub(crate) library_error: Option<String>,
     pub(crate) compact_busy: bool,
@@ -88,6 +93,7 @@ pub struct LibraryApp {
     pub(crate) pending_toggle_flyout: bool,
     pub(crate) flyout_open: bool,
     pub(crate) activate: ActivateBridge,
+    pub(crate) live: LiveHandle,
 }
 
 impl LibraryApp {
@@ -159,7 +165,9 @@ impl LibraryApp {
             filter: FilterKind::Library,
             settings_return_filter: FilterKind::Library,
             settings_category: SettingsCategory::General,
-            selected_app_id: state.selected_app_id,
+            selected_id: state
+                .selected_title_id
+                .or_else(|| state.selected_app_id.map(steam_title_id)),
             library_scanning: true,
             library_error: None,
             compact_busy: false,
@@ -191,7 +199,10 @@ impl LibraryApp {
             pending_toggle_flyout: false,
             flyout_open: false,
             activate,
+            live: LiveHandle::start(),
         };
+        app.live
+            .set_allow_dstorage(app.settings.allow_dstorage_override);
         app.subscribe_sliders(cx);
         app.sync_tray_lifetime(cx);
         app.refresh_library(cx);
@@ -270,9 +281,12 @@ impl LibraryApp {
         self.library_error = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
+            let include_xbox = this
+                .update(cx, |app, _| app.settings.include_xbox_games)
+                .unwrap_or(false);
             let result = cx
                 .background_executor()
-                .spawn(async { scan_steam_library() })
+                .spawn(async move { scan_library(include_xbox) })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.library_scanning = false;
@@ -280,9 +294,12 @@ impl LibraryApp {
                     Ok(games) => {
                         app.games = games;
                         app.library_error = None;
-                        if app.selected_app_id.is_none() {
-                            app.selected_app_id = app.games.first().map(|g| g.app_id);
+                        if app.selected_id.is_none() {
+                            app.selected_id = app.games.first().map(|g| g.id.clone());
                         }
+                        app.live.sync_titles(&app.games);
+                        app.live
+                            .set_allow_dstorage(app.settings.allow_dstorage_override);
                     }
                     Err(msg) => {
                         app.games.clear();
@@ -323,19 +340,19 @@ impl LibraryApp {
         cx.notify();
     }
 
-    pub(crate) fn select_game(&mut self, app_id: u32, cx: &mut Context<Self>) {
-        self.selected_app_id = Some(app_id);
+    pub(crate) fn select_game(&mut self, id: String, cx: &mut Context<Self>) {
+        self.selected_id = Some(id);
         self.flush_state_now();
         cx.notify();
     }
 
     pub(crate) fn library_counts(&self) -> (i32, i32, i32) {
         let all = self.games.len() as i32;
-        let compacted = self.games.iter().filter(|g| is_compacted(g)).count() as i32;
+        let compacted = self.games.iter().filter(|g| g.is_compacted()).count() as i32;
         (all, compacted, all - compacted)
     }
 
-    pub(crate) fn visible_games(&self, cx: &App) -> Vec<SteamGame> {
+    pub(crate) fn visible_games(&self, cx: &App) -> Vec<LibraryTitle> {
         let query = self
             .search_input
             .read(cx)
@@ -346,21 +363,35 @@ impl LibraryApp {
             .iter()
             .filter(|game| match self.filter {
                 FilterKind::Library | FilterKind::Settings => true,
-                FilterKind::Compacted => is_compacted(game),
-                FilterKind::Uncompacted => !is_compacted(game),
+                FilterKind::Compacted => game.is_compacted(),
+                FilterKind::Uncompacted => !game.is_compacted(),
             })
             .filter(|game| {
                 query.is_empty()
                     || game.name.to_ascii_lowercase().contains(&query)
-                    || game.app_id.to_string().contains(&query)
+                    || game.id.to_ascii_lowercase().contains(&query)
+                    || game.store.badge().to_ascii_lowercase().contains(&query)
+                    || game
+                        .launcher_id
+                        .as_deref()
+                        .is_some_and(|id| id.to_ascii_lowercase().contains(&query))
             })
             .cloned()
             .collect()
     }
 
-    pub(crate) fn selected_game(&self) -> Option<&SteamGame> {
-        let id = self.selected_app_id?;
-        self.games.iter().find(|g| g.app_id == id)
+    pub(crate) fn selected_game(&self) -> Option<&LibraryTitle> {
+        let id = self.selected_id.as_ref()?;
+        self.games.iter().find(|g| g.id == *id)
+    }
+
+    fn compact_algorithm_for(
+        &self,
+        title: &LibraryTitle,
+        is_launching: bool,
+    ) -> Option<CompactAlgorithm> {
+        let policy = shelf_policy_for(title, is_launching);
+        algorithm_from_policy(&policy, self.settings.compact_algorithm)
     }
 
     pub(crate) fn estimate_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -368,12 +399,20 @@ impl LibraryApp {
             self.show_toast("Select a game first.", cx);
             return;
         };
-        if title_is_auto_excluded(&game.name) || path_is_auto_excluded(&game.install_path) {
+        if title_is_compact_excluded(&game) {
             self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
             return;
         }
-        let algorithm = self.settings.compact_algorithm.for_live_library();
-        match estimate_compact(&game.install_path, algorithm) {
+        let Some(algorithm) = self.compact_algorithm_for(&game, false) else {
+            self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
+            return;
+        };
+        let estimate = if algorithm == CompactAlgorithm::Lzx {
+            estimate_compact_with(&game.install_path, algorithm)
+        } else {
+            estimate_compact(&game.install_path, algorithm)
+        };
+        match estimate {
             Ok(estimate) => {
                 self.open_estimate_dialog(window, cx, estimate, game.name);
             }
@@ -395,9 +434,21 @@ impl LibraryApp {
             self.show_toast("Select a game first.", cx);
             return;
         };
-        if title_is_auto_excluded(&game.name) || path_is_auto_excluded(&game.install_path) {
+        if title_is_compact_excluded(&game) {
             self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
             return;
+        }
+        if let Some(app_id) = game.steam_app_id() {
+            if self.live.is_locked(&app_id.to_string()) {
+                self.show_error_toast(
+                    format!(
+                        "{} is patching. Live Compact has locked this title.",
+                        game.name
+                    ),
+                    cx,
+                );
+                return;
+            }
         }
         match preflight(&game.install_path, self.settings.allow_dstorage_override) {
             Err(CompactRefuse::DirectStorage { .. }) => {
@@ -421,8 +472,25 @@ impl LibraryApp {
             Ok(()) => {}
         }
 
-        let algorithm = self.settings.compact_algorithm.for_live_library();
-        match estimate_compact(&game.install_path, algorithm) {
+        let algorithm = match op {
+            CompactOp::Uncompress => self.settings.compact_algorithm.for_live_library(),
+            CompactOp::Compress => match self.compact_algorithm_for(&game, false) {
+                Some(algo) => algo,
+                None => {
+                    self.show_error_toast(
+                        format!("{} is auto-excluded from compact.", game.name),
+                        cx,
+                    );
+                    return;
+                }
+            },
+        };
+        let estimate = if algorithm == CompactAlgorithm::Lzx {
+            estimate_compact_with(&game.install_path, algorithm)
+        } else {
+            estimate_compact(&game.install_path, algorithm)
+        };
+        match estimate {
             Ok(estimate) => {
                 let verb = match op {
                     CompactOp::Compress => "Compact",
@@ -443,6 +511,7 @@ impl LibraryApp {
         }
 
         self.compact_busy = true;
+        self.live.set_compact_busy(true);
         self.compact_progress = Some(CompactProgress {
             processed: 0,
             total: 1,
@@ -451,13 +520,20 @@ impl LibraryApp {
         cx.notify();
 
         let allow = self.settings.allow_dstorage_override;
+        let allow_lzx = algorithm == CompactAlgorithm::Lzx;
         let path = game.install_path.clone();
         let name = game.name.clone();
         let (tx, rx) = async_channel::unbounded::<Result<CompactProgress, String>>();
         std::thread::spawn(move || {
-            let result = apply_compact(op, &path, algorithm, allow, |progress| {
-                let _ = tx.send_blocking(Ok(progress));
-            });
+            let result = if allow_lzx {
+                apply_compact_allowing_lzx(op, &path, algorithm, allow, |progress| {
+                    let _ = tx.send_blocking(Ok(progress));
+                })
+            } else {
+                apply_compact(op, &path, algorithm, allow, |progress| {
+                    let _ = tx.send_blocking(Ok(progress));
+                })
+            };
             match result {
                 Ok(done) => {
                     let _ = tx.send_blocking(Ok(CompactProgress {
@@ -481,6 +557,7 @@ impl LibraryApp {
                         app.compact_progress = Some(progress.clone());
                         if finished {
                             app.compact_busy = false;
+                            app.live.set_compact_busy(false);
                             app.show_toast(progress.message.clone(), cx);
                             notify_compact(
                                 app.system_tray.as_ref(),
@@ -497,6 +574,7 @@ impl LibraryApp {
                     }
                     Err(err) => {
                         app.compact_busy = false;
+                        app.live.set_compact_busy(false);
                         app.compact_progress = None;
                         app.show_error_toast(err.clone(), cx);
                         notify_compact(
@@ -520,11 +598,168 @@ impl LibraryApp {
     }
 
     pub(crate) fn flush_state_now(&mut self) {
+        let selected_steam = self.selected_game().and_then(|g| g.steam_app_id());
         let state = AppState {
-            selected_app_id: self.selected_app_id,
-            last_compact_app_id: self.selected_app_id,
+            selected_app_id: selected_steam,
+            selected_title_id: self.selected_id.clone(),
+            last_compact_app_id: selected_steam,
         };
         let _ = save_state(&self.paths, &state);
+    }
+
+    pub(crate) fn toggle_live_compact(&mut self, cx: &mut Context<Self>) {
+        let paused = self.live.toggle_paused();
+        self.show_toast(
+            if paused {
+                "Live Compact paused."
+            } else {
+                "Live Compact resumed."
+            },
+            cx,
+        );
+        cx.notify();
+    }
+
+    pub(crate) fn recompact_last_patch(&mut self, cx: &mut Context<Self>) {
+        if self.compact_busy {
+            self.show_toast("A compact job is already running.", cx);
+            return;
+        }
+        self.compact_busy = true;
+        self.live.set_compact_busy(true);
+        self.compact_progress = Some(CompactProgress {
+            processed: 0,
+            total: 1,
+            message: "Recompacting last patch…".into(),
+        });
+        cx.notify();
+        let live = self.live.clone();
+        let (tx, rx) = async_channel::unbounded::<Result<String, String>>();
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(live.recompact_last_patch());
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(result) = rx.recv().await {
+                let _ = this.update(cx, |app, cx| {
+                    app.compact_busy = false;
+                    app.live.set_compact_busy(false);
+                    app.compact_progress = None;
+                    match result {
+                        Ok(msg) => {
+                            app.show_toast(msg, cx);
+                            app.refresh_library(cx);
+                        }
+                        Err(err) => app.show_error_toast(err, cx),
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    pub(crate) fn launch_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(game) = self.selected_game().cloned() else {
+            self.show_toast("Select a game first.", cx);
+            return;
+        };
+        let policy = shelf_policy_for(&game, true);
+        if matches!(policy, shelf::CompactPolicy::Xpress) && !self.compact_busy {
+            self.start_compact_walkback_then_launch(&game, window, cx);
+            return;
+        }
+        if let Err(msg) = open_title(&game) {
+            self.show_error_toast(msg, cx);
+        }
+    }
+
+    fn start_compact_walkback_then_launch(
+        &mut self,
+        game: &LibraryTitle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let _ = window;
+        if title_is_compact_excluded(game) {
+            if let Err(msg) = open_title(game) {
+                self.show_error_toast(msg, cx);
+            }
+            return;
+        }
+        self.compact_busy = true;
+        self.live.set_compact_busy(true);
+        self.compact_progress = Some(CompactProgress {
+            processed: 0,
+            total: 1,
+            message: "Walking back to XPRESS…".into(),
+        });
+        cx.notify();
+        let allow = self.settings.allow_dstorage_override;
+        let path = game.install_path.clone();
+        let name = game.name.clone();
+        let launch_game = game.clone();
+        let (tx, rx) = async_channel::unbounded::<Result<CompactProgress, String>>();
+        std::thread::spawn(move || {
+            let result = apply_compact(
+                CompactOp::Compress,
+                &path,
+                CompactAlgorithm::Xpress,
+                allow,
+                |progress| {
+                    let _ = tx.send_blocking(Ok(progress));
+                },
+            );
+            match result {
+                Ok(done) => {
+                    let _ = tx.send_blocking(Ok(CompactProgress {
+                        processed: 1,
+                        total: 1,
+                        message: done.message,
+                    }));
+                }
+                Err(err) => {
+                    let _ = tx.send_blocking(Err(err));
+                }
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            while let Ok(item) = rx.recv().await {
+                let cont = this.update(cx, |app, cx| match item {
+                    Ok(progress) => {
+                        let finished = progress.message.contains("WOF /EXE")
+                            || progress.message == "Finished.";
+                        app.compact_progress = Some(progress.clone());
+                        if finished {
+                            app.compact_busy = false;
+                            app.live.set_compact_busy(false);
+                            if let Err(msg) = open_title(&launch_game) {
+                                app.show_error_toast(msg, cx);
+                            } else {
+                                app.show_toast(format!("{name}: walked back to XPRESS."), cx);
+                            }
+                        }
+                        cx.notify();
+                        true
+                    }
+                    Err(err) => {
+                        app.compact_busy = false;
+                        app.live.set_compact_busy(false);
+                        app.compact_progress = None;
+                        if let Err(msg) = open_title(&launch_game) {
+                            app.show_error_toast(format!("{err} — {msg}"), cx);
+                        } else {
+                            app.show_error_toast(err, cx);
+                        }
+                        cx.notify();
+                        false
+                    }
+                });
+                if !matches!(cont, Ok(true)) {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn flush_window_layout_now(&mut self) {
@@ -562,10 +797,12 @@ fn window_layout_from_window(window: &Window) -> WindowLayout {
     layout
 }
 
-fn is_compacted(game: &SteamGame) -> bool {
-    match (game.on_disk_bytes, game.logical_bytes) {
-        (Some(disk), Some(logical)) => disk + logical / 20 < logical,
-        _ => false,
+fn open_title(title: &LibraryTitle) -> Result<(), String> {
+    if let Some(app_id) = title.steam_app_id() {
+        open::that(format!("steam://rungameid/{app_id}"))
+            .map_err(|e| format!("Could not launch Steam title: {e}"))
+    } else {
+        open::that(&title.install_path).map_err(|e| format!("Could not open install folder: {e}"))
     }
 }
 

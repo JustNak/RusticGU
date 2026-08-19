@@ -149,7 +149,11 @@ fn idle_then_downloading_locks_then_stays_then_incrementally_recompacts() {
     let idle = watch.tick().unwrap();
     assert!(idle.is_empty(), "idle installed must not lock: {idle:?}");
     assert!(!watch.is_locked("570"));
-    assert!(!watch.compact.events.iter().any(|e| matches!(e, CompactEvent::Lock(_))));
+    assert!(!watch
+        .compact
+        .events
+        .iter()
+        .any(|e| matches!(e, CompactEvent::Lock(_))));
 
     watch.status.titles[0].state_flags = FULLY_INSTALLED | DOWNLOADING;
     watch.status.titles[0].bytes_to_download = 1_000;
@@ -197,13 +201,7 @@ fn idle_then_downloading_locks_then_stays_then_incrementally_recompacts() {
         }
         other => panic!("expected incremental, got {other:?}"),
     }
-    assert!(
-        watch
-            .compact
-            .events
-            .iter()
-            .all(|e| !e.is_force_full_tree())
-    );
+    assert!(watch.compact.events.iter().all(|e| !e.is_force_full_tree()));
 }
 
 #[test]

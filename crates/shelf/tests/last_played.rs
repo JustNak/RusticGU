@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use shelf::{
-    last_played_from_acf, last_played_from_itch_local_last_run_at, last_played_from_steam_localconfig,
-    last_played_unix_from_steam_userdata, recommend, safe_last_played_source, CompactPolicy,
-    PolicyInput, ShelfConfig, default_denylist,
+    default_denylist, last_played_from_acf, last_played_from_itch_local_last_run_at,
+    last_played_from_steam_localconfig, last_played_unix_from_steam_userdata, recommend,
+    safe_last_played_source, CompactPolicy, PolicyInput, ShelfConfig,
 };
 
 fn steam_fixture_root() -> PathBuf {
@@ -106,10 +106,8 @@ fn steam_userdata_path_reads_localconfig_last_played_only() {
         "different appid has no LastPlayed"
     );
 
-    let acf = std::fs::read_to_string(
-        steam_fixture_root().join("steamapps/appmanifest_570.acf"),
-    )
-    .unwrap();
+    let acf = std::fs::read_to_string(steam_fixture_root().join("steamapps/appmanifest_570.acf"))
+        .unwrap();
     assert!(acf.contains("LastUpdated"));
     assert_eq!(last_played_from_acf(&acf), None);
 }

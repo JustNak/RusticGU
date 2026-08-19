@@ -26,12 +26,12 @@ pub use compact::{
     CompactEvent, Compactor, FileCompactState, FileInventory, IncrementalPlan, InstallFile,
     MemoryInventory, RecordingCompactor,
 };
+pub use dstorage::{detect_direct_storage, DirectStorageHint, DSTORAGE_CORE_DLL, DSTORAGE_DLL};
 pub use error::{WatchError, WatchResult};
 pub use flags::{
-    PatchingSignals, ACTIVE_POLL_INTERVAL_SECS, DOWNLOADING, FULLY_INSTALLED, IDLE_POLL_INTERVAL_SECS,
-    PATCHING_BITS, UPDATE_REQUIRED, UPDATE_STARTED, VALIDATING,
+    PatchingSignals, ACTIVE_POLL_INTERVAL_SECS, DOWNLOADING, FULLY_INSTALLED,
+    IDLE_POLL_INTERVAL_SECS, PATCHING_BITS, UPDATE_REQUIRED, UPDATE_STARTED, VALIDATING,
 };
-pub use dstorage::{detect_direct_storage, DirectStorageHint, DSTORAGE_CORE_DLL, DSTORAGE_DLL};
 pub use machine::{FsWatchGate, LiveWatch, TickEvent};
 pub use skip::{
     extension_is_skipped, folder_is_skipped, is_compact_candidate, is_save_folder_path,

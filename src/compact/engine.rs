@@ -6,7 +6,9 @@ use crate::settings::CompactAlgorithm;
 
 use crate::library::steam_updating_app_id;
 
-use super::command::{build_apply_invocations, build_compact_command, CompactOp};
+use super::command::{
+    build_apply_invocations_with, build_compact_command, build_incremental_invocations, CompactOp,
+};
 use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
@@ -105,7 +107,14 @@ pub fn estimate_compact(
     root: &Path,
     algorithm: CompactAlgorithm,
 ) -> Result<CompactEstimate, String> {
-    let algorithm = algorithm.for_live_library();
+    estimate_compact_with(root, algorithm.for_live_library())
+}
+
+/// Estimate using the algorithm as given (Shelf may pass LZX).
+pub fn estimate_compact_with(
+    root: &Path,
+    algorithm: CompactAlgorithm,
+) -> Result<CompactEstimate, String> {
     if !root.is_dir() {
         return Err("Game folder is missing.".into());
     }
@@ -135,6 +144,7 @@ fn estimate_ratio(algorithm: CompactAlgorithm) -> f64 {
         CompactAlgorithm::Xpress4k => 0.70,
         CompactAlgorithm::Xpress8k => XPRESS8K_RATIO,
         CompactAlgorithm::Xpress16k => 0.55,
+        CompactAlgorithm::Xpress => 0.68,
         CompactAlgorithm::Lzx => 0.48,
     }
 }
@@ -334,11 +344,67 @@ pub fn apply_compact(
     root: &Path,
     algorithm: CompactAlgorithm,
     allow_dstorage: bool,
+    progress: impl FnMut(CompactProgress),
+) -> Result<CompactResult, String> {
+    apply_wof(
+        op,
+        root,
+        algorithm.for_live_library(),
+        allow_dstorage,
+        None,
+        progress,
+    )
+}
+
+/// Apply using the algorithm as given so Shelf can request LZX.
+pub fn apply_compact_allowing_lzx(
+    op: CompactOp,
+    root: &Path,
+    algorithm: CompactAlgorithm,
+    allow_dstorage: bool,
+    progress: impl FnMut(CompactProgress),
+) -> Result<CompactResult, String> {
+    apply_wof(op, root, algorithm, allow_dstorage, None, progress)
+}
+
+/// Incremental recompact of named files. Live algorithm only; never `/F` or root `/S`.
+pub fn apply_incremental(
+    root: &Path,
+    files: &[PathBuf],
+    algorithm: CompactAlgorithm,
+    allow_dstorage: bool,
+    progress: impl FnMut(CompactProgress),
+) -> Result<CompactResult, String> {
+    apply_wof(
+        CompactOp::Compress,
+        root,
+        algorithm.for_live_library(),
+        allow_dstorage,
+        Some(files),
+        progress,
+    )
+}
+
+fn apply_wof(
+    op: CompactOp,
+    root: &Path,
+    algorithm: CompactAlgorithm,
+    allow_dstorage: bool,
+    explicit_files: Option<&[PathBuf]>,
     mut progress: impl FnMut(CompactProgress),
 ) -> Result<CompactResult, String> {
-    let algorithm = algorithm.for_live_library();
     preflight(root, allow_dstorage).map_err(|e| e.to_string())?;
-    let estimate = estimate_compact(root, algorithm)?;
+    let estimate = if explicit_files.is_some() {
+        CompactEstimate {
+            file_count: explicit_files.map(|f| f.len()).unwrap_or(1).max(1),
+            skipped_count: 0,
+            logical_bytes: 0,
+            estimated_on_disk_bytes: 0,
+            has_dstorage: super::skip::tree_contains_dstorage(root),
+        }
+    } else {
+        estimate_compact_with(root, algorithm)?
+    };
     progress(CompactProgress {
         processed: 0,
         total: estimate.file_count.max(1),
@@ -348,7 +414,13 @@ pub fn apply_compact(
         },
     });
 
-    let invocations = build_apply_invocations(op, root, algorithm);
+    let invocations = match explicit_files {
+        Some(files) => build_incremental_invocations(root, files, algorithm),
+        None => {
+            let coerce_live = algorithm.is_live();
+            build_apply_invocations_with(op, root, algorithm, coerce_live)
+        }
+    };
     if invocations.is_empty() {
         return Ok(CompactResult {
             ok: true,

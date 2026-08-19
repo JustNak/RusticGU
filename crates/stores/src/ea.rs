@@ -137,14 +137,11 @@ fn discover_ea_index(fs: &impl IndexFs, path: &Path) -> StoreResult<Vec<Discover
     let text = fs.read_to_string(path)?;
     let value: Value =
         serde_json::from_str(&text).map_err(|e| StoreError::parse(path, e.to_string()))?;
-    let parsed: EaIndexFile = serde_json::from_value(value)
-        .map_err(|e| StoreError::parse(path, e.to_string()))?;
+    let parsed: EaIndexFile =
+        serde_json::from_value(value).map_err(|e| StoreError::parse(path, e.to_string()))?;
     let mut out = Vec::new();
     for g in parsed.games.into_iter().chain(parsed.installs) {
-        let install = g
-            .install_path
-            .or(g.base_install_path)
-            .unwrap_or_default();
+        let install = g.install_path.or(g.base_install_path).unwrap_or_default();
         if install.trim().is_empty() {
             continue;
         }
@@ -154,7 +151,12 @@ fn discover_ea_index(fs: &impl IndexFs, path: &Path) -> StoreResult<Vec<Discover
             .or(g.base_slug)
             .unwrap_or_else(|| "Unknown EA title".into());
         let launcher_id = g.software_id.or(g.content_id);
-        out.push(DiscoveredTitle::new(StoreId::Ea, title, install, launcher_id));
+        out.push(DiscoveredTitle::new(
+            StoreId::Ea,
+            title,
+            install,
+            launcher_id,
+        ));
     }
     Ok(out)
 }

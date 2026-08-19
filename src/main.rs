@@ -8,6 +8,7 @@ mod branding;
 mod compact;
 mod format;
 mod library;
+mod live;
 mod notifications;
 mod persistence;
 mod settings;

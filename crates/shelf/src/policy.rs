@@ -98,5 +98,10 @@ pub fn recommend(
 
 /// Convenience using [`ShelfConfig::default`] and [`crate::default_denylist`].
 pub fn recommend_default(input: &PolicyInput<'_>, now: SystemTime) -> CompactPolicy {
-    recommend(input, now, &ShelfConfig::default(), &crate::default_denylist())
+    recommend(
+        input,
+        now,
+        &ShelfConfig::default(),
+        &crate::default_denylist(),
+    )
 }

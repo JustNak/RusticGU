@@ -57,6 +57,8 @@ impl PendingWhatsNew {
 pub struct AppState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_app_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_title_id: Option<String>,
     #[serde(default)]
     pub last_compact_app_id: Option<u32>,
 }
@@ -186,6 +188,7 @@ mod tests {
 
         let state = AppState {
             selected_app_id: Some(730),
+            selected_title_id: Some("steam:730".into()),
             last_compact_app_id: Some(570),
         };
         save_state(&paths, &state).unwrap();

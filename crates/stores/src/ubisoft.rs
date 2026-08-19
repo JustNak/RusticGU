@@ -42,12 +42,8 @@ pub fn discover(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| id.clone());
             if seen.insert(id.clone()) {
-                let mut title = DiscoveredTitle::new(
-                    StoreId::Ubisoft,
-                    folder,
-                    PathBuf::from(dir),
-                    Some(id),
-                );
+                let mut title =
+                    DiscoveredTitle::new(StoreId::Ubisoft, folder, PathBuf::from(dir), Some(id));
                 title.language = language;
                 titles.push(title);
             }
@@ -100,8 +96,8 @@ fn read_json_index(
         ));
     }
     let text = fs.read_to_string(path)?;
-    let idx: UbiIndex =
-        serde_json::from_str(&text).map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
+    let idx: UbiIndex = serde_json::from_str(&text)
+        .map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
     let mut out = Vec::new();
     for g in idx.games {
         let install = g.install_dir.or(g.install_path).unwrap_or_default();

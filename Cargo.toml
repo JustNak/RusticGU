@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "apps/updater"]
+members = [".", "apps/updater", "crates/stores", "crates/watch", "crates/shelf"]
 resolver = "2"
 
 [package]
@@ -30,6 +30,9 @@ path = "src/main.rs"
 winresource = "0.1"
 
 [dependencies]
+stores = { path = "crates/stores" }
+watch = { path = "crates/watch" }
+shelf = { path = "crates/shelf" }
 gpui = "0.2.2"
 gpui-component = "0.5.1"
 async-channel = "2"

@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::error::{StoreError, StoreResult};
-use crate::util::{file_name_eq_ignore_case, looks_like_volume_root, normalize_path_key, path_contains_component};
+use crate::util::{
+    file_name_eq_ignore_case, looks_like_volume_root, normalize_path_key, path_contains_component,
+};
 
 /// Directory listing entry from an injected index filesystem.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +108,11 @@ impl IndexFs for StdFs {
                 is_dir: child.is_dir(),
             });
         }
-        out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+        out.sort_by(|a, b| {
+            a.name
+                .to_ascii_lowercase()
+                .cmp(&b.name.to_ascii_lowercase())
+        });
         Ok(out)
     }
 }
@@ -147,8 +153,7 @@ impl MemoryFs {
                 self.add_dir(parent);
             }
         }
-        self.files
-            .insert(normalize_path_key(path), contents.into());
+        self.files.insert(normalize_path_key(path), contents.into());
     }
 
     fn lookup_file(&self, path: &Path) -> Option<&[u8]> {
@@ -159,8 +164,7 @@ impl MemoryFs {
 
     fn has_dir(&self, path: &Path) -> bool {
         let key = normalize_path_key(path);
-        self.dirs.contains_key(&key)
-            || self.files.keys().any(|k| k.starts_with(&format!("{key}/")))
+        self.dirs.contains_key(&key) || self.files.keys().any(|k| k.starts_with(&format!("{key}/")))
     }
 }
 
@@ -301,7 +305,9 @@ impl<F: IndexFs> IndexFs for RecordingFs<F> {
 }
 
 pub fn never_opened_butler_db(paths: &[PathBuf]) -> bool {
-    !paths.iter().any(|p| file_name_eq_ignore_case(p, "butler.db"))
+    !paths
+        .iter()
+        .any(|p| file_name_eq_ignore_case(p, "butler.db"))
 }
 
 pub fn never_opened_ubisoft_ownership(paths: &[PathBuf]) -> bool {

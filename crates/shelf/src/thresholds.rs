@@ -53,13 +53,19 @@ mod tests {
 
     #[test]
     fn never_played_is_cold() {
-        assert_eq!(Recency::classify(None, &ShelfConfig::default()), Recency::Cold);
+        assert_eq!(
+            Recency::classify(None, &ShelfConfig::default()),
+            Recency::Cold
+        );
     }
 
     #[test]
     fn week_old_is_recent() {
         assert_eq!(
-            Recency::classify(Some(Duration::from_secs(3 * 86400)), &ShelfConfig::default()),
+            Recency::classify(
+                Some(Duration::from_secs(3 * 86400)),
+                &ShelfConfig::default()
+            ),
             Recency::Recent
         );
     }
@@ -67,7 +73,10 @@ mod tests {
     #[test]
     fn month_old_is_cold() {
         assert_eq!(
-            Recency::classify(Some(Duration::from_secs(30 * 86400)), &ShelfConfig::default()),
+            Recency::classify(
+                Some(Duration::from_secs(30 * 86400)),
+                &ShelfConfig::default()
+            ),
             Recency::Cold
         );
     }

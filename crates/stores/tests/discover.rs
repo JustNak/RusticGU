@@ -108,7 +108,11 @@ fn dual_register_same_title_from_two_stores() {
         .iter()
         .filter(|t| t.title.eq_ignore_ascii_case("Hades"))
         .collect();
-    assert_eq!(hades.len(), 2, "Epic + GOG Hades must both appear: {hades:?}");
+    assert_eq!(
+        hades.len(),
+        2,
+        "Epic + GOG Hades must both appear: {hades:?}"
+    );
     let stores: Vec<StoreId> = hades.iter().map(|t| t.store).collect();
     assert!(stores.contains(&StoreId::Epic));
     assert!(stores.contains(&StoreId::Gog));
@@ -137,7 +141,10 @@ fn ea_origin_and_desktop_index() {
         &full_roots(),
         &DiscoverOptions::default(),
     );
-    let ea: Vec<_> = report.titles_for(StoreId::Ea).map(|t| t.title.as_str()).collect();
+    let ea: Vec<_> = report
+        .titles_for(StoreId::Ea)
+        .map(|t| t.title.as_str())
+        .collect();
     assert!(ea.contains(&"Titanfall 2"), "{ea:?}");
     assert!(ea.contains(&"Apex Legends"), "{ea:?}");
 }
@@ -219,11 +226,15 @@ fn itch_fetch_caves_only_and_never_opens_butler_db() {
     let fx = fixtures();
     let rec = RecordingFs::new(StdFs);
     let roots = full_roots();
-    let report = StoreProbe::new(&rec, MemoryHive::new(), roots).discover_all(&DiscoverOptions::default());
+    let report =
+        StoreProbe::new(&rec, MemoryHive::new(), roots).discover_all(&DiscoverOptions::default());
     let itch: Vec<_> = report.titles_for(StoreId::Itch).collect();
     assert!(itch.iter().any(|t| t.title == "Celeste"), "{itch:?}");
     assert_eq!(
-        itch.iter().find(|t| t.title == "Celeste").unwrap().last_played_unix,
+        itch.iter()
+            .find(|t| t.title == "Celeste")
+            .unwrap()
+            .last_played_unix,
         Some(1700000000)
     );
 
@@ -241,7 +252,12 @@ fn itch_fetch_caves_only_and_never_opens_butler_db() {
 #[test]
 fn xbox_default_off_vs_opt_in() {
     let roots = full_roots();
-    let off = discover_all(&StdFs, &MemoryHive::new(), &roots, &DiscoverOptions::default());
+    let off = discover_all(
+        &StdFs,
+        &MemoryHive::new(),
+        &roots,
+        &DiscoverOptions::default(),
+    );
     assert!(
         off.titles_for(StoreId::XboxGames).next().is_none(),
         "XboxGames must be off by default"

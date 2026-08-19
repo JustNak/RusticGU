@@ -67,7 +67,9 @@ fn save_folders_skip_dat_bin_inside_but_not_outside() {
     assert!(!is_compact_candidate(&PathBuf::from(
         r"game\SaveGames\foo.dat"
     )));
-    assert!(!is_compact_candidate(&PathBuf::from(r"game\saves\slot.bin")));
+    assert!(!is_compact_candidate(&PathBuf::from(
+        r"game\saves\slot.bin"
+    )));
     assert!(!is_compact_candidate(&PathBuf::from(
         r"My Game\Saved Games\profile.sav"
     )));
@@ -88,7 +90,10 @@ fn save_folders_skip_dat_bin_inside_but_not_outside() {
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
-    assert!(names.iter().any(|n| n.ends_with(r"data\foo.dat")), "{names:?}");
+    assert!(
+        names.iter().any(|n| n.ends_with(r"data\foo.dat")),
+        "{names:?}"
+    );
     assert!(names.iter().any(|n| n.contains("Config")), "{names:?}");
     assert!(!names.iter().any(|n| n.contains("SaveGames")));
     assert!(!names.iter().any(|n| n.contains("saves")));

@@ -126,8 +126,8 @@ fn parse_product_settings(
 
 fn read_update_status(fs: &impl IndexFs, path: &Path) -> crate::error::StoreResult<Option<String>> {
     let text = fs.read_to_string(path)?;
-    let v: Value =
-        serde_json::from_str(&text).map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
+    let v: Value = serde_json::from_str(&text)
+        .map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
     let status = v
         .get("status")
         .or_else(|| v.get("state"))
@@ -173,8 +173,8 @@ fn read_installs_json(
         ));
     }
     let text = fs.read_to_string(path)?;
-    let parsed: RiotInstalls =
-        serde_json::from_str(&text).map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
+    let parsed: RiotInstalls = serde_json::from_str(&text)
+        .map_err(|e| crate::error::StoreError::parse(path, e.to_string()))?;
     let mut out = Vec::new();
     if let Some(map) = parsed.associated_client.as_object() {
         for (game_path, _client) in map {
@@ -188,7 +188,12 @@ fn read_installs_json(
             if name.eq_ignore_ascii_case("Riot Client") {
                 continue;
             }
-            out.push(DiscoveredTitle::new(StoreId::Riot, name, game_path.as_str(), None));
+            out.push(DiscoveredTitle::new(
+                StoreId::Riot,
+                name,
+                game_path.as_str(),
+                None,
+            ));
         }
     }
     Ok(out)

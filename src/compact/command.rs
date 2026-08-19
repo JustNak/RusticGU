@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use crate::settings::CompactAlgorithm;
 
-use super::skip::collect_included_files;
+use super::skip::{collect_included_files, should_skip};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactOp {
@@ -52,7 +52,15 @@ pub fn build_compact_files_command(
     files: &[PathBuf],
     algorithm: CompactAlgorithm,
 ) -> CompactInvocation {
-    let algorithm = algorithm.for_live_library();
+    build_wof_files_command(op, files, algorithm.for_live_library())
+}
+
+/// WOF command using the algorithm as given (Shelf may pass LZX).
+pub fn build_wof_files_command(
+    op: CompactOp,
+    files: &[PathBuf],
+    algorithm: CompactAlgorithm,
+) -> CompactInvocation {
     let mut args = Vec::new();
     match op {
         CompactOp::Compress => {
@@ -81,6 +89,21 @@ pub fn build_apply_invocations(
     root: &Path,
     algorithm: CompactAlgorithm,
 ) -> Vec<CompactInvocation> {
+    build_apply_invocations_with(op, root, algorithm, true)
+}
+
+/// Same as [`build_apply_invocations`], optionally keeping Shelf LZX.
+pub fn build_apply_invocations_with(
+    op: CompactOp,
+    root: &Path,
+    algorithm: CompactAlgorithm,
+    coerce_live: bool,
+) -> Vec<CompactInvocation> {
+    let algorithm = if coerce_live {
+        algorithm.for_live_library()
+    } else {
+        algorithm
+    };
     match op {
         CompactOp::Compress => {
             let files = collect_included_files(root);
@@ -88,6 +111,35 @@ pub fn build_apply_invocations(
         }
         CompactOp::Uncompress => vec![build_uncompress_root_command(root)],
     }
+}
+
+/// Incremental recompact: named files only. Never `/F`, never `/S` on the install root.
+pub fn build_incremental_invocations(
+    root: &Path,
+    files: &[PathBuf],
+    algorithm: CompactAlgorithm,
+) -> Vec<CompactInvocation> {
+    let algorithm = algorithm.for_live_library();
+    let resolved: Vec<PathBuf> = files
+        .iter()
+        .map(|f| {
+            if f.is_absolute() {
+                f.clone()
+            } else {
+                root.join(f)
+            }
+        })
+        .filter(|p| p.is_file() && !should_skip(p))
+        .collect();
+    batch_apply_files(CompactOp::Compress, &resolved, algorithm)
+}
+
+/// True when this invocation asks `compact.exe` to force a full rewrite (`/F`).
+pub fn invocation_has_force_flag(inv: &CompactInvocation) -> bool {
+    inv.args.iter().any(|a| {
+        let u = a.to_string_lossy().to_ascii_uppercase();
+        u == "/F" || u.starts_with("/F:")
+    })
 }
 
 /// Undo may recurse the install root (`/U /EXE /S`). Compress must not.
@@ -126,7 +178,7 @@ fn batch_apply_files(
         if !batch.is_empty()
             && (batch.len() >= APPLY_BATCH_FILES || chars.saturating_add(add) > APPLY_BATCH_CHARS)
         {
-            out.push(build_compact_files_command(op, &batch, algorithm));
+            out.push(build_wof_files_command(op, &batch, algorithm));
             batch.clear();
             chars = 0;
         }
@@ -134,7 +186,7 @@ fn batch_apply_files(
         batch.push(file.clone());
     }
     if !batch.is_empty() {
-        out.push(build_compact_files_command(op, &batch, algorithm));
+        out.push(build_wof_files_command(op, &batch, algorithm));
     }
     out
 }
@@ -434,6 +486,54 @@ mod tests {
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| e.eq_ignore_ascii_case("mp4"))
         }));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn incremental_recompact_has_no_force_or_root_s() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-incr-cmd-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(root.join("SaveGames")).unwrap();
+        std::fs::write(root.join("new_patch.vpk"), b"vpk").unwrap();
+        std::fs::write(root.join("movie.mp4"), b"vid").unwrap();
+        std::fs::write(root.join("SaveGames").join("slot.sav"), b"save").unwrap();
+
+        let invs = build_incremental_invocations(
+            &root,
+            &[
+                PathBuf::from("new_patch.vpk"),
+                PathBuf::from("movie.mp4"),
+                PathBuf::from("SaveGames").join("slot.sav"),
+            ],
+            CompactAlgorithm::Xpress8k,
+        );
+        assert!(!invs.is_empty());
+        for inv in &invs {
+            let line = inv.display_cmdline().to_ascii_uppercase();
+            assert!(!invocation_has_force_flag(inv), "{line}");
+            assert!(!line.contains("/F"), "{line}");
+            assert!(!line.contains("/S"), "{line}");
+            assert!(!invocation_recurses_install_root(inv, &root), "{line}");
+            assert!(is_wof_exe_command(inv));
+            assert!(!is_lznt1_command(inv));
+            assert!(line.contains("/EXE:XPRESS8K"), "{line}");
+        }
+        let joined = invs
+            .iter()
+            .map(|i| i.display_cmdline().replace('\\', "/").to_ascii_lowercase())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("new_patch.vpk"), "{joined}");
+        assert!(!joined.contains("movie.mp4"), "{joined}");
+        assert!(!joined.contains("slot.sav"), "{joined}");
 
         let _ = std::fs::remove_dir_all(&root);
     }
