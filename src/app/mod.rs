@@ -1,6 +1,7 @@
 mod about_dialog;
 mod compact_apply;
 mod compact_dialog;
+mod compact_flow;
 mod confirm_dialogs;
 mod cover_flow;
 mod filter;
@@ -54,6 +55,7 @@ use crate::settings::{Settings, WindowLayout};
 use crate::startup::launched_minimized;
 use crate::tray::SystemTray;
 use crate::updater::UpdateInfo;
+use compact_flow::CompactFlow;
 use toast::Toast;
 use widgets::render_vignette_overlay;
 
@@ -72,6 +74,7 @@ pub struct LibraryApp {
     pub(crate) library_error: Option<String>,
     pub(crate) compact_busy: bool,
     pub(crate) compact_progress: Option<CompactProgress>,
+    pub(crate) compact_flow: Option<CompactFlow>,
     pub(crate) toasts: Vec<Toast>,
     pub(crate) next_toast_id: u64,
     pub(crate) pending_toast: Option<String>,
@@ -183,6 +186,7 @@ impl LibraryApp {
             library_error: None,
             compact_busy: false,
             compact_progress: None,
+            compact_flow: None,
             toasts: Vec::new(),
             next_toast_id: 1,
             pending_toast: None,
@@ -519,7 +523,7 @@ impl LibraryApp {
         cx: &mut Context<Self>,
     ) {
         match op {
-            CompactOp::Compress => self.open_compact_level_dialog(window, cx),
+            CompactOp::Compress => self.open_compact_flow(window, cx),
             CompactOp::Uncompress => {
                 self.apply_compact_jobs(self.selected_titles(), op, None, window, cx)
             }
@@ -815,5 +819,8 @@ impl Render for LibraryApp {
             .children(dialog_layer)
             .children(sheet_layer)
             .child(self.render_toast_layer(cx))
+            .when(self.compact_flow.is_some(), |el| {
+                el.child(self.render_compact_flow(cx))
+            })
     }
 }

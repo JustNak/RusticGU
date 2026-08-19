@@ -703,6 +703,7 @@ mod tests {
             last_played_unix: None,
             logical_bytes: logical,
             on_disk_bytes: on_disk,
+            compacted: crate::library::sizes_indicate_compacted(on_disk, logical),
             steam_app_id: Some(1),
             steam_library_path: None,
             steam_install_dir_name: None,
