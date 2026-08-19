@@ -18,4 +18,6 @@ pub use engine::{
     is_windows_apps_path, os_supports_wof, running_exe_in_tree, volume_filesystem, CompactResult,
 };
 #[allow(unused_imports)]
-pub use skip::{should_skip, skip_reason, tree_contains_dstorage};
+pub use skip::{
+    path_is_auto_excluded, should_skip, skip_reason, title_is_auto_excluded, tree_contains_dstorage,
+};

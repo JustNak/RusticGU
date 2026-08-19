@@ -33,7 +33,8 @@ use crate::appearance::{
     apply_appearance, film_grain_image, noise_enabled, vignette_edge_alpha, vignette_enabled,
 };
 use crate::compact::{
-    apply_compact, estimate_compact, preflight, CompactOp, CompactProgress, CompactRefuse,
+    apply_compact, estimate_compact, path_is_auto_excluded, preflight, title_is_auto_excluded,
+    CompactOp, CompactProgress, CompactRefuse,
 };
 use crate::library::{scan_steam_library, SteamGame};
 use crate::notifications::notify_compact;
@@ -367,6 +368,10 @@ impl LibraryApp {
             self.show_toast("Select a game first.", cx);
             return;
         };
+        if title_is_auto_excluded(&game.name) || path_is_auto_excluded(&game.install_path) {
+            self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
+            return;
+        }
         let algorithm = self.settings.compact_algorithm.for_live_library();
         match estimate_compact(&game.install_path, algorithm) {
             Ok(estimate) => {
@@ -390,6 +395,10 @@ impl LibraryApp {
             self.show_toast("Select a game first.", cx);
             return;
         };
+        if title_is_auto_excluded(&game.name) || path_is_auto_excluded(&game.install_path) {
+            self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
+            return;
+        }
         match preflight(&game.install_path, self.settings.allow_dstorage_override) {
             Err(CompactRefuse::DirectStorage { .. }) => {
                 if let Ok(estimate) = estimate_compact(
@@ -399,7 +408,7 @@ impl LibraryApp {
                     self.open_dstorage_warning(window, cx, estimate);
                 } else {
                     self.show_error_toast(
-                        "dstorage.dll is present. Enable the override in Settings → General to compact.",
+                        "dstorage.dll or dstoragecore.dll is present. Enable the override in Settings → General to compact.",
                         cx,
                     );
                 }

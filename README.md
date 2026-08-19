@@ -12,8 +12,9 @@ Built in Rust with [gpui](https://www.gpui.rs/) `0.2.2` and [gpui-component](htt
 - Show those games as cards with logical vs on-disk size when cheap to read
 - Compact / uncompact a selected folder with WOF only (`compact /C /EXE:<algo>` / `compact /U /EXE`)
 - Default algorithm: **XPRESS8K**. XPRESS4K / XPRESS16K are selectable. **LZX is not** — reserved for Shelf
-- Skip saves, caches, and already-compressed media (video / audio / archives, logs / dumps, shader cache, SaveGames)
-- If `dstorage.dll` is in the tree: warn and skip (do not compact) unless Settings → General override is On
+- Skip listed video / audio / image / archive / log-temp extensions (not `wav`, `dds`, or `bnk`); skip SaveGames, shader / pipeline / API caches, and logs / dumps
+- Auto-exclude Guild Wars 2 and Secret World Legends (not offered for compact)
+- If `dstorage.dll` or `dstoragecore.dll` is in the tree: warn and skip (do not compact) unless Settings → General override is On
 - Refuse ReFS, a running exe in-tree, and WindowsApps paths
 - Dry-run estimate before apply; progress + toast on done / fail
 - Settings: General / System / Appearance (live draft; Save commits)

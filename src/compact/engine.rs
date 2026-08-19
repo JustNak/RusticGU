@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::settings::CompactAlgorithm;
 
 use super::command::{build_compact_command, CompactOp};
-use super::skip::{should_skip, tree_contains_dstorage, walkdir_limited};
+use super::skip::{auto_excluded_title, should_skip, tree_contains_dstorage, walkdir_limited};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
 const XPRESS8K_RATIO: f64 = 0.62;
@@ -16,6 +16,7 @@ pub enum CompactRefuse {
     WindowsApps,
     RunningExecutable { path: PathBuf },
     DirectStorage { override_allowed: bool },
+    AutoExcluded { title: String },
     UnsupportedOs,
     NotNtfs { filesystem: String },
     MissingFolder,
@@ -35,13 +36,19 @@ impl std::fmt::Display for CompactRefuse {
             ),
             Self::DirectStorage { override_allowed } => {
                 if *override_allowed {
-                    write!(f, "dstorage.dll is present; override is enabled.")
+                    write!(
+                        f,
+                        "dstorage.dll or dstoragecore.dll is present; override is enabled."
+                    )
                 } else {
                     write!(
                         f,
-                        "This install includes dstorage.dll (DirectStorage). Compact is blocked unless you enable the override in Settings → General."
+                        "This install includes dstorage.dll or dstoragecore.dll (DirectStorage). Compact is blocked unless you enable the override in Settings → General."
                     )
                 }
+            }
+            Self::AutoExcluded { title } => {
+                write!(f, "{title} is auto-excluded from compact.")
             }
             Self::UnsupportedOs => {
                 write!(
@@ -133,6 +140,9 @@ fn estimate_ratio(algorithm: CompactAlgorithm) -> f64 {
 pub fn preflight(root: &Path, allow_dstorage: bool) -> Result<(), CompactRefuse> {
     if !root.exists() {
         return Err(CompactRefuse::MissingFolder);
+    }
+    if let Some(title) = auto_excluded_title(root) {
+        return Err(CompactRefuse::AutoExcluded { title });
     }
     if is_windows_apps_path(root) {
         return Err(CompactRefuse::WindowsApps);
@@ -505,6 +515,22 @@ mod tests {
         assert!(!is_windows_apps_path(Path::new(
             r"D:\SteamLibrary\steamapps\common\Foo"
         )));
+    }
+
+    #[test]
+    fn preflight_refuses_auto_excluded_title_folder() {
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-excl-{}-{}/Guild Wars 2",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let err = preflight(&root, false).unwrap_err();
+        assert!(matches!(err, CompactRefuse::AutoExcluded { .. }));
+        let _ = std::fs::remove_dir_all(root.parent().unwrap_or(&root));
     }
 
     #[test]

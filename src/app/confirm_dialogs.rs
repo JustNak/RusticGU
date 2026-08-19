@@ -25,7 +25,7 @@ impl LibraryApp {
                     v_flex()
                         .gap_2()
                         .child(div().text_sm().child(
-                            "This install contains dstorage.dll. Compacting it can break DirectStorage I/O.",
+                            "This install contains dstorage.dll or dstoragecore.dll. Compacting it can break DirectStorage I/O.",
                         ))
                         .child(
                             div()
@@ -97,7 +97,7 @@ impl LibraryApp {
                             div()
                                 .text_xs()
                                 .text_color(theme.danger)
-                                .child("Warning: dstorage.dll is in this tree."),
+                                .child("Warning: dstorage.dll or dstoragecore.dll is in this tree."),
                         )
                     }),
             )

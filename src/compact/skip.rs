@@ -2,27 +2,87 @@
 
 use std::path::Path;
 
-/// Video / audio / archive extensions that should not be WOF-compressed.
+/// Video / audio / image / archive / log extensions that must not be WOF-compressed.
+///
+/// `wav`, `dds`, and `bnk` are intentionally **not** on this list.
 const SKIP_EXTENSIONS: &[&str] = &[
     // video
-    "mp4", "mkv", "webm", "avi", "mov", "wmv", "m4v", "mpg", "mpeg", "m2v", "bik", "bk2", "usm",
-    "ogv", "flv", // audio
-    "mp3", "wav", "flac", "ogg", "wma", "aac", "m4a", "opus", "aiff", "aif",
-    // archives / already-compressed packages
-    "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "cab", "iso", "vpk", "pak", "wad", "arc",
-    "lz4", "zst", "zstd", // logs / dumps
-    "log", "dmp", "mdmp", "hdmp", "wer",
+    "bik",
+    "bk2",
+    "bik2",
+    "pc_binkvid",
+    "mp4",
+    "webm",
+    "mkv",
+    "avi",
+    "wmv",
+    "flv",
+    "mpg",
+    "m2v",
+    "m4v",
+    "vob",
+    "usm",
+    "ivf", // audio (not wav)
+    "mp3",
+    "ogg",
+    "wma",
+    "flac",
+    "opus",
+    "m4a",
+    "aac",
+    "wem",
+    "fsb",
+    "xwma",
+    // images / textures (not dds)
+    "jpg",
+    "jpeg",
+    "png",
+    "webp",
+    "ktx",
+    "ktx2",
+    "basis",
+    "basisu",
+    "astc",
+    "pvr",
+    "crn",
+    "tfc",
+    // archives
+    "zip",
+    "7z",
+    "rar",
+    "gz",
+    "xz",
+    "cab",
+    "bz2",
+    "tgz",
+    "lz",
+    "txz",
+    "dmg",
+    "lzx",
+    "br",
+    "lz4",
+    "lzma",
+    "zst",
+    "zstd", // logs / temp
+    "log",
+    "dmp",
+    "tmp",
 ];
 
-/// Directory names (case-insensitive) to skip entirely.
+/// Directory names (case-insensitive) to skip entirely when they appear in the tree.
 const SKIP_DIR_NAMES: &[&str] = &[
     "savegames",
     "saved games",
     "saves",
     "shadercache",
     "shader cache",
-    "nv_cache",
+    "pipelinecache",
+    "pipelinecaches",
+    "psocache",
     "dxcache",
+    "vkcache",
+    "glcache",
+    "nv_cache",
     "gpucache",
     "logs",
     "log",
@@ -30,6 +90,11 @@ const SKIP_DIR_NAMES: &[&str] = &[
     "crashdumps",
     "crash_dumps",
 ];
+
+/// Titles that must not be offered for compact (name or install-folder match).
+const AUTO_EXCLUDE_TITLES: &[&str] = &["guild wars 2", "secret world legends"];
+
+const DSTORAGE_FILENAMES: &[&str] = &["dstorage.dll", "dstoragecore.dll"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
@@ -57,24 +122,42 @@ pub fn skip_reason(path: &Path) -> Option<SkipReason> {
 }
 
 pub fn extension_is_skipped(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.trim_start_matches('.').to_ascii_lowercase());
+    let ext = extension_lower(path);
     match ext {
         Some(ext) => SKIP_EXTENSIONS.iter().any(|s| *s == ext),
         None => false,
     }
 }
 
+fn extension_lower(path: &Path) -> Option<String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .or_else(|| path.to_str())
+        .unwrap_or("")
+        .replace('\\', "/");
+    let name = name.rsplit('/').next().unwrap_or(name.as_str());
+    let ext = name.rsplit_once('.')?.1;
+    Some(ext.trim().to_ascii_lowercase())
+}
+
 pub fn path_has_skipped_dir(path: &Path) -> bool {
     // Split on both separators so Windows-style fixtures still match on Linux CI hosts.
     let raw = path.to_string_lossy().replace('\\', "/");
-    raw.split('/').filter(|part| !part.is_empty()).any(|name| {
-        SKIP_DIR_NAMES
-            .iter()
-            .any(|d| *d == name.to_ascii_lowercase())
-    })
+    let parts: Vec<String> = raw
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .map(|part| part.to_ascii_lowercase())
+        .collect();
+    if parts
+        .windows(2)
+        .any(|pair| pair[0] == "saved" && pair[1] == "pipelinecaches")
+    {
+        return true;
+    }
+    parts
+        .iter()
+        .any(|name| SKIP_DIR_NAMES.iter().any(|d| *d == name))
 }
 
 fn file_looks_like_log_or_dump(path: &Path) -> bool {
@@ -85,24 +168,82 @@ fn file_looks_like_log_or_dump(path: &Path) -> bool {
         .to_ascii_lowercase();
     name.ends_with(".log")
         || name.ends_with(".dmp")
+        || name.ends_with(".tmp")
         || name.ends_with(".mdmp")
         || name.contains("crashdump")
         || name.contains("minidump")
 }
 
-/// DirectStorage runtime in the tree — compacting this install can break IO.
-pub fn tree_contains_dstorage(root: &Path) -> bool {
-    contains_file_named(root, "dstorage.dll")
+fn normalize_title(name: &str) -> String {
+    name.replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .unwrap_or(name)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
-fn contains_file_named(root: &Path, target: &str) -> bool {
-    let walker = walkdir_limited(root, 8);
-    walker.into_iter().any(|path| {
+/// True when this display name or install-folder name is auto-excluded.
+pub fn title_is_auto_excluded(name: &str) -> bool {
+    let n = normalize_title(name);
+    AUTO_EXCLUDE_TITLES.iter().any(|title| n == *title)
+}
+
+/// True when any path component is an auto-excluded title.
+pub fn path_is_auto_excluded(path: &Path) -> bool {
+    let raw = path.to_string_lossy().replace('\\', "/");
+    raw.split('/').any(title_is_auto_excluded)
+}
+
+/// Display title used when refusing an auto-excluded path.
+pub fn auto_excluded_title(path: &Path) -> Option<String> {
+    let raw = path.to_string_lossy().replace('\\', "/");
+    raw.split('/').find_map(|part| {
+        if title_is_auto_excluded(part) {
+            Some(part.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// DirectStorage runtime in the tree — compacting this install can break IO.
+pub fn tree_contains_dstorage(root: &Path) -> bool {
+    contains_any_file_named(root, DSTORAGE_FILENAMES)
+}
+
+fn contains_any_file_named(root: &Path, targets: &[&str]) -> bool {
+    walk_all_files(root, 12).into_iter().any(|path| {
         path.file_name()
             .and_then(|n| n.to_str())
-            .map(|n| n.eq_ignore_ascii_case(target))
+            .map(|n| targets.iter().any(|t| n.eq_ignore_ascii_case(t)))
             .unwrap_or(false)
     })
+}
+
+/// Walk files without applying the skip-dir prune (used to find DirectStorage DLLs).
+fn walk_all_files(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    fn rec(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<std::path::PathBuf>) {
+        if depth > max_depth {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                rec(&path, depth + 1, max_depth, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    rec(root, 0, max_depth, &mut out);
+    out
 }
 
 /// Bounded walk so tests and dry-run stay cheap. Production compact also uses this.
@@ -137,19 +278,107 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn skips_video_audio_archives() {
-        for name in [
+    fn skips_listed_video_audio_image_archive_temp_exts() {
+        let names = [
+            "cut.bik",
+            "cut.bk2",
+            "cut.bik2",
+            "cut.pc_binkvid",
             "clip.mp4",
+            "clip.webm",
+            "clip.mkv",
+            "clip.avi",
+            "clip.wmv",
+            "clip.flv",
+            "clip.mpg",
+            "clip.m2v",
+            "clip.m4v",
+            "clip.vob",
+            "clip.usm",
+            "clip.ivf",
+            "song.mp3",
+            "song.ogg",
+            "song.wma",
             "song.flac",
+            "song.opus",
+            "song.m4a",
+            "song.aac",
+            "song.wem",
+            "song.fsb",
+            "song.xwma",
+            "tex.jpg",
+            "tex.jpeg",
+            "tex.png",
+            "tex.webp",
+            "tex.ktx",
+            "tex.ktx2",
+            "tex.basis",
+            "tex.basisu",
+            "tex.astc",
+            "tex.pvr",
+            "tex.crn",
+            "tex.tfc",
             "pack.zip",
-            "chunk.vpk",
-            "movie.bik",
-        ] {
+            "pack.7z",
+            "pack.rar",
+            "pack.gz",
+            "pack.xz",
+            "pack.cab",
+            "pack.bz2",
+            "pack.tgz",
+            "pack.lz",
+            "pack.txz",
+            "pack.dmg",
+            "pack.lzx",
+            "pack.br",
+            "pack.lz4",
+            "pack.lzma",
+            "pack.zst",
+            "pack.zstd",
+            "out.log",
+            "crash.dmp",
+            "scratch.tmp",
+        ];
+        for name in names {
             assert!(
                 should_skip(&PathBuf::from(name)),
                 "expected skip for {name}"
             );
+            if !matches!(
+                name.rsplit_once('.').map(|(_, e)| e),
+                Some("log" | "dmp" | "tmp")
+            ) {
+                assert_eq!(
+                    skip_reason(&PathBuf::from(name)),
+                    Some(SkipReason::Extension),
+                    "{name}"
+                );
+            }
         }
+    }
+
+    #[test]
+    fn does_not_hard_skip_wav_dds_bnk() {
+        for name in [
+            "voice.wav",
+            "albedo.dds",
+            "events.bnk",
+            "SOUND.WAV",
+            "A.DDS",
+        ] {
+            assert!(
+                !should_skip(&PathBuf::from(name)),
+                "must not hard-skip {name}"
+            );
+            assert!(!extension_is_skipped(&PathBuf::from(name)), "{name}");
+        }
+        assert!(!should_skip(&PathBuf::from(
+            r"C:\games\Foo\audio\voice.wav"
+        )));
+        assert!(!should_skip(&PathBuf::from(r"C:\games\Foo\tex\albedo.dds")));
+        assert!(!should_skip(&PathBuf::from(
+            r"C:\games\Foo\sound\events.bnk"
+        )));
     }
 
     #[test]
@@ -158,9 +387,87 @@ mod tests {
             r"C:\games\Foo\ShaderCache\cache.bin"
         )));
         assert!(should_skip(&PathBuf::from(
+            r"C:\games\Foo\shadercache\cache.bin"
+        )));
+        assert!(should_skip(&PathBuf::from(
             r"C:\games\Foo\SaveGames\slot1.sav"
         )));
         assert!(should_skip(&PathBuf::from(r"D:\Bar\logs\output.log")));
+        assert!(should_skip(&PathBuf::from(r"D:\Bar\dumps\crash.dmp")));
+    }
+
+    #[test]
+    fn skips_pipeline_and_api_cache_folders() {
+        for path in [
+            r"C:\games\Foo\PipelineCache\pso.bin",
+            r"C:\games\Foo\PipelineCaches\pso.bin",
+            r"C:\games\Foo\PSOCache\pso.bin",
+            r"C:\games\Foo\DXCache\dx.bin",
+            r"C:\games\Foo\VkCache\vk.bin",
+            r"C:\games\Foo\GLCache\gl.bin",
+            r"C:\games\Foo\Saved\PipelineCaches\pso.bin",
+        ] {
+            assert!(
+                should_skip(&PathBuf::from(path)),
+                "expected folder skip for {path}"
+            );
+            assert_eq!(
+                skip_reason(&PathBuf::from(path)),
+                Some(SkipReason::Directory),
+                "{path}"
+            );
+        }
+        assert!(!path_has_skipped_dir(Path::new(
+            r"C:\games\Foo\Saved\SaveSlots\slot.sav"
+        )));
+    }
+
+    #[test]
+    fn auto_excludes_guild_wars_2_and_secret_world_legends() {
+        assert!(title_is_auto_excluded("Guild Wars 2"));
+        assert!(title_is_auto_excluded("guild  wars  2"));
+        assert!(title_is_auto_excluded("Secret World Legends"));
+        assert!(path_is_auto_excluded(Path::new(
+            r"D:\SteamLibrary\steamapps\common\Guild Wars 2"
+        )));
+        assert!(path_is_auto_excluded(Path::new(
+            r"E:\SteamLibrary\steamapps\common\Secret World Legends"
+        )));
+        assert_eq!(
+            auto_excluded_title(Path::new(r"D:\SteamLibrary\steamapps\common\Guild Wars 2"))
+                .as_deref(),
+            Some("Guild Wars 2")
+        );
+        assert!(!title_is_auto_excluded("Guild Wars"));
+        assert!(!title_is_auto_excluded("Counter-Strike 2"));
+        assert!(!path_is_auto_excluded(Path::new(
+            r"D:\SteamLibrary\steamapps\common\Counter-Strike Global Offensive"
+        )));
+    }
+
+    #[test]
+    fn detects_dstorage_and_dstoragecore() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-dstorage-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        std::fs::write(root.join("bin").join("game.exe"), b"exe").unwrap();
+        assert!(!tree_contains_dstorage(&root));
+
+        std::fs::write(root.join("bin").join("dstoragecore.dll"), b"ds").unwrap();
+        assert!(tree_contains_dstorage(&root));
+
+        std::fs::remove_file(root.join("bin").join("dstoragecore.dll")).unwrap();
+        std::fs::write(root.join("dstorage.dll"), b"ds").unwrap();
+        assert!(tree_contains_dstorage(&root));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -89,7 +89,7 @@ impl LibraryApp {
                 ))
                 .child(settings_choice_row(
                     "Allow DirectStorage override",
-                    Some("If dstorage.dll is in the tree, compact is blocked unless this is On."),
+                    Some("If dstorage.dll or dstoragecore.dll is in the tree, compact is blocked unless this is On."),
                     h_flex()
                         .gap_2()
                         .child(

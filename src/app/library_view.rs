@@ -11,7 +11,7 @@ use gpui_component::{
 
 use super::widgets::{empty_state_badge, styled_progress};
 use super::LibraryApp;
-use crate::compact::CompactOp;
+use crate::compact::{path_is_auto_excluded, title_is_auto_excluded, CompactOp};
 use crate::format::format_size_pair;
 use crate::library::SteamGame;
 
@@ -156,6 +156,7 @@ fn render_game_card(
         .zip(game.logical_bytes)
         .is_some_and(|(disk, logical)| disk < logical.saturating_sub(logical / 20));
     let path = game.install_path.display().to_string();
+    let excluded = title_is_auto_excluded(&game.name) || path_is_auto_excluded(&game.install_path);
 
     v_flex()
         .id(SharedString::from(format!("game-card-{app_id}")))
@@ -205,7 +206,13 @@ fn render_game_card(
                         .bg(theme.primary.opacity(0.16))
                         .text_xs()
                         .text_color(theme.primary)
-                        .child(if compacted { "Compacted" } else { "Inflated" }),
+                        .child(if excluded {
+                            "Excluded"
+                        } else if compacted {
+                            "Compacted"
+                        } else {
+                            "Inflated"
+                        }),
                 ),
         )
         .child(
@@ -235,7 +242,7 @@ fn render_game_card(
                             .outline()
                             .small()
                             .label("Estimate")
-                            .disabled(busy)
+                            .disabled(busy || excluded)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.estimate_selected(window, cx);
                             })),
@@ -245,7 +252,7 @@ fn render_game_card(
                             .primary()
                             .small()
                             .label("Compact")
-                            .disabled(busy)
+                            .disabled(busy || excluded)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.start_compact(CompactOp::Compress, window, cx);
                             })),
@@ -255,7 +262,7 @@ fn render_game_card(
                             .outline()
                             .small()
                             .label("Undo")
-                            .disabled(busy)
+                            .disabled(busy || excluded)
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.start_compact(CompactOp::Uncompress, window, cx);
                             })),
