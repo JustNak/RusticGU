@@ -66,7 +66,6 @@ pub struct LibraryApp {
     pub(crate) settings_category: SettingsCategory,
     pub(crate) selected_id: Option<String>,
     pub(crate) selected_ids: HashSet<String>,
-    pub(crate) hovered_id: Option<String>,
     pub(crate) covers: HashMap<String, Arc<gpui::RenderImage>>,
     pub(crate) cover_inflight: HashSet<String>,
     pub(crate) library_scanning: bool,
@@ -178,7 +177,6 @@ impl LibraryApp {
                 .selected_title_id
                 .or_else(|| state.selected_app_id.map(steam_title_id)),
             selected_ids: HashSet::new(),
-            hovered_id: None,
             covers: HashMap::new(),
             cover_inflight: HashSet::new(),
             library_scanning: true,
