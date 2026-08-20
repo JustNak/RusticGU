@@ -101,7 +101,31 @@ pub enum SkipReason {
     Extension,
     Directory,
     LogDumpName,
+    /// Unity/addressable container whose name is packed video/audio, or a file
+    /// whose header is already a compressed media bitstream.
+    PackedMedia,
 }
+
+/// Unity / addressable containers that can wrap already-compressed media.
+const MEDIA_CONTAINER_EXTS: &[&str] = &["bundle", "assets", "resource", "ress"];
+
+/// Filename tokens (split on non-alphanumerics) that mean packed video/audio.
+///
+/// `videos_assets_all_*.bundle` matches; `asset_references_*.bundle` does not.
+const PACKED_MEDIA_TOKENS: &[&str] = &[
+    "video",
+    "videos",
+    "movie",
+    "movies",
+    "cutscene",
+    "cutscenes",
+    "music",
+    "audio",
+    "sound",
+    "sounds",
+    "jingle",
+    "soundtrack",
+];
 
 /// True when this path should not be passed to `compact /EXE`.
 pub fn should_skip(path: &Path) -> bool {
@@ -118,7 +142,63 @@ pub fn skip_reason(path: &Path) -> Option<SkipReason> {
     if extension_is_skipped(path) {
         return Some(SkipReason::Extension);
     }
+    if packed_media_container(path) || file_has_incompressible_media_magic(path) {
+        return Some(SkipReason::PackedMedia);
+    }
     None
+}
+
+/// True when this is a game-data container named as packed video/audio.
+pub fn packed_media_container(path: &Path) -> bool {
+    match extension_lower(path) {
+        Some(ext) if MEDIA_CONTAINER_EXTS.iter().any(|s| *s == ext) => {
+            filename_has_packed_media_token(path)
+        }
+        _ => false,
+    }
+}
+
+fn filename_has_packed_media_token(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .any(|token| PACKED_MEDIA_TOKENS.contains(&token))
+}
+
+/// Peek the header of an on-disk file for already-compressed media bitstreams.
+///
+/// Missing files (unit-test path stubs) are not skipped. WAVE/RIFF is left
+/// alone so `.wav` without an extension stays eligible.
+fn file_has_incompressible_media_magic(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut buf = [0u8; 16];
+    let Ok(n) = file.read(&mut buf) else {
+        return false;
+    };
+    let b = &buf[..n];
+    if b.len() >= 8 && &b[4..8] == b"ftyp" {
+        return true;
+    }
+    if b.starts_with(b"OggS")
+        || b.starts_with(b"ID3")
+        || b.starts_with(b"FSB5")
+        || b.starts_with(b"FSB4")
+        || b.starts_with(b"BIK")
+        || b.starts_with(b"KB2")
+    {
+        return true;
+    }
+    if b.len() >= 2 && b[0] == 0xFF && matches!(b[1], 0xFB | 0xF3 | 0xF2) {
+        return true;
+    }
+    b.len() >= 4 && b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3
 }
 
 pub fn extension_is_skipped(path: &Path) -> bool {
@@ -286,7 +366,7 @@ pub fn walkdir_limited(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn skips_listed_video_audio_image_archive_temp_exts() {
@@ -491,6 +571,66 @@ mod tests {
     }
 
     #[test]
+    fn skips_unity_video_and_music_bundles_keeps_other_bundles() {
+        for name in [
+            r"C:\games\BloonsTD6\BloonsTD6_Data\StreamingAssets\aa\StandaloneWindows64\Full\videos_assets_all_2ab8.bundle",
+            r"C:\games\BloonsTD6\BloonsTD6_Data\StreamingAssets\aa\StandaloneWindows64\Half\music_assets_musictitle_4311.bundle",
+            r"D:\SteamLibrary\steamapps\common\Game\Audio_streams.bundle",
+            "cutscene_intro.assets",
+            "sound_bank.resource",
+        ] {
+            assert!(
+                packed_media_container(Path::new(name)),
+                "expected packed-media skip for {name}"
+            );
+            assert_eq!(
+                skip_reason(Path::new(name)),
+                Some(SkipReason::PackedMedia),
+                "{name}"
+            );
+        }
+        for name in [
+            r"C:\games\BloonsTD6\BloonsTD6_Data\StreamingAssets\aa\StandaloneWindows64\Full\asset_references_assets_all_13a2.bundle",
+            r"C:\games\BloonsTD6\GameAssembly.dll",
+            r"C:\games\BloonsTD6\BloonsTD6_Data\resources.assets",
+            r"C:\games\Foo\sharedassets0.assets",
+            "sprite_atlases_assets_all_aabb.bundle",
+            "AudioMixer.dll",
+        ] {
+            assert!(
+                !packed_media_container(Path::new(name)),
+                "must not skip {name}"
+            );
+            assert!(!should_skip(Path::new(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn skips_on_disk_files_with_media_magic() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir =
+            std::env::temp_dir().join(format!("rusticgu-magic-{}-{}", std::process::id(), stamp));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mp4 = dir.join("clip.bin");
+        let mut bytes = vec![0u8; 16];
+        bytes[4..8].copy_from_slice(b"ftyp");
+        std::fs::write(&mp4, bytes).unwrap();
+        let ogg = dir.join("track.bin");
+        std::fs::write(&ogg, b"OggS........").unwrap();
+        let plain = dir.join("level.dat");
+        std::fs::write(&plain, b"not media!!").unwrap();
+
+        assert_eq!(skip_reason(&mp4), Some(SkipReason::PackedMedia));
+        assert_eq!(skip_reason(&ogg), Some(SkipReason::PackedMedia));
+        assert!(skip_reason(&plain).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn collect_included_files_matches_skip_list() {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -503,6 +643,8 @@ mod tests {
         std::fs::write(root.join("data").join("level.dat"), b"d").unwrap();
         std::fs::write(root.join("albedo.dds"), b"dds").unwrap();
         std::fs::write(root.join("clip.mkv"), b"mkv").unwrap();
+        std::fs::write(root.join("videos_assets_all_2ab8.bundle"), b"vid").unwrap();
+        std::fs::write(root.join("asset_references_assets_all.bundle"), b"ref").unwrap();
         std::fs::write(root.join("ShaderCache").join("pso.bin"), b"p").unwrap();
 
         let included = collect_included_files(&root);
@@ -512,7 +654,9 @@ mod tests {
             .collect();
         assert!(names.contains(&"level.dat".into()));
         assert!(names.contains(&"albedo.dds".into()));
+        assert!(names.contains(&"asset_references_assets_all.bundle".into()));
         assert!(!names.iter().any(|n| n == "clip.mkv" || n == "pso.bin"));
+        assert!(!names.iter().any(|n| n.starts_with("videos_")));
 
         let _ = std::fs::remove_dir_all(&root);
     }

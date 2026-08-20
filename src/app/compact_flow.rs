@@ -528,10 +528,10 @@ fn render_flow_done(flow: &CompactFlow, cx: &mut Context<LibraryApp>) -> impl In
     let theme = cx.theme().clone();
     let (before_disk, after_disk, reclaimed) = aggregate_stats(&flow.stats);
     let hero = done_hero(reclaimed, flow.failed, !flow.stats.is_empty());
-    let fill = if before_disk == 0 {
+    let after_frac = if before_disk == 0 {
         1.0
     } else {
-        after_disk as f32 / before_disk as f32
+        (after_disk as f32 / before_disk as f32).clamp(0.04, 1.0)
     };
     v_flex()
         .id("compact-flow-done")
@@ -578,37 +578,22 @@ fn render_flow_done(flow: &CompactFlow, cx: &mut Context<LibraryApp>) -> impl In
                 v_flex()
                     .w_full()
                     .gap_2()
-                    .child(
-                        div()
-                            .w_full()
-                            .h(px(10.))
-                            .rounded_full()
-                            .bg(theme.secondary.opacity(0.55))
-                            .child(
-                                div()
-                                    .h_full()
-                                    .w(relative(fill.clamp(0.06, 1.0)))
-                                    .rounded_full()
-                                    .bg(theme.primary),
-                            ),
-                    )
-                    .child(
-                        h_flex()
-                            .w_full()
-                            .justify_between()
-                            .child(stat_col(
-                                "Before",
-                                before_disk,
-                                theme.muted_foreground,
-                                theme.foreground,
-                            ))
-                            .child(stat_col(
-                                "After",
-                                after_disk,
-                                theme.muted_foreground,
-                                theme.foreground,
-                            )),
-                    ),
+                    .child(done_size_row(
+                        "Before",
+                        before_disk,
+                        1.0,
+                        theme.secondary,
+                        theme.muted_foreground,
+                        theme.foreground,
+                    ))
+                    .child(done_size_row(
+                        "After",
+                        after_disk,
+                        after_frac,
+                        theme.primary,
+                        theme.muted_foreground,
+                        theme.foreground,
+                    )),
             )
         })
         .when(flow.stats.len() > 1, |el| {
@@ -642,15 +627,33 @@ fn render_flow_done(flow: &CompactFlow, cx: &mut Context<LibraryApp>) -> impl In
         )
 }
 
-fn stat_col(
+fn done_size_row(
     label: &'static str,
     bytes: u64,
+    frac: f32,
+    bar: gpui::Hsla,
     muted: gpui::Hsla,
     fg: gpui::Hsla,
 ) -> impl IntoElement {
-    v_flex()
-        .gap_0p5()
-        .child(div().text_xs().text_color(muted).child(label))
+    h_flex()
+        .w_full()
+        .items_center()
+        .gap_3()
+        .child(div().w(px(52.)).text_xs().text_color(muted).child(label))
+        .child(
+            div()
+                .flex_1()
+                .h(px(8.))
+                .rounded_full()
+                .bg(muted.opacity(0.18))
+                .child(
+                    div()
+                        .h_full()
+                        .w(relative(frac.clamp(0.04, 1.0)))
+                        .rounded_full()
+                        .bg(bar),
+                ),
+        )
         .child(
             div()
                 .text_sm()
@@ -697,16 +700,32 @@ fn flow_heading(titles: &[LibraryTitle], kind: CompactFlowKind, phase: CompactFl
     }
 }
 
-fn flow_hint(phase: CompactFlowPhase, failed: bool) -> &'static str {
+fn flow_hint(phase: CompactFlowPhase, _failed: bool) -> &'static str {
     match phase {
         CompactFlowPhase::Choose => "Pick a strength to start. You can cancel until then.",
         CompactFlowPhase::Working => "Keep this window open until the job finishes.",
-        CompactFlowPhase::Done | CompactFlowPhase::Leaving if failed => {
+        CompactFlowPhase::Done | CompactFlowPhase::Leaving => {
             "Click anywhere to return to the library."
         }
-        CompactFlowPhase::Done | CompactFlowPhase::Leaving => {
-            "Click anywhere or any button to return."
-        }
+    }
+}
+
+/// Library toast / overlay subtitle. Never says "Failed 0."
+pub(crate) fn compact_job_summary(
+    op: CompactOp,
+    label: &str,
+    ok_n: usize,
+    fail_n: usize,
+    total: usize,
+) -> String {
+    let verb = match op {
+        CompactOp::Compress => "Compressed",
+        CompactOp::Uncompress => "Restored",
+    };
+    match (ok_n, fail_n) {
+        (ok, 0) if ok > 0 => format!("{verb} {label}."),
+        (0, _) => format!("Couldn't finish {label}."),
+        (ok, fail) => format!("{verb} {ok} of {total}. {fail} couldn't finish."),
     }
 }
 
@@ -748,6 +767,7 @@ fn done_hero(reclaimed: u64, failed: bool, has_stats: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compact::CompactOp;
     use crate::library::LibraryStore;
     use std::path::PathBuf;
 
@@ -794,9 +814,19 @@ mod tests {
             }
         }
         blob.push_str(&done_hero(18_000_000_000, false, true));
+        blob.push_str(&compact_job_summary(
+            CompactOp::Compress,
+            "Bloons TD 6",
+            1,
+            0,
+            1,
+        ));
+        blob.push_str(flow_hint(CompactFlowPhase::Done, false));
         let upper = blob.to_ascii_uppercase();
         assert!(!upper.contains("XPRESS"), "{blob}");
         assert!(!upper.contains("LZX"), "{blob}");
+        assert!(!upper.contains("FAILED"), "{blob}");
+        assert!(!upper.contains("WOF"), "{blob}");
         assert!(
             flow_heading(&one, CompactFlowKind::Compress, CompactFlowPhase::Choose)
                 .contains("Apex Legends")
@@ -863,5 +893,41 @@ mod tests {
         };
         assert_eq!(stat.reclaimed_bytes(), 12);
         assert_eq!(aggregate_stats(&[stat]), (20, 8, 12));
+    }
+
+    #[test]
+    fn job_summary_never_says_failed_zero() {
+        assert_eq!(
+            compact_job_summary(CompactOp::Compress, "Bloons TD 6", 1, 0, 1),
+            "Compressed Bloons TD 6."
+        );
+        assert_eq!(
+            compact_job_summary(CompactOp::Compress, "3 titles", 3, 0, 3),
+            "Compressed 3 titles."
+        );
+        assert_eq!(
+            compact_job_summary(CompactOp::Uncompress, "Bloons TD 6", 1, 0, 1),
+            "Restored Bloons TD 6."
+        );
+        assert_eq!(
+            compact_job_summary(CompactOp::Compress, "Bloons TD 6", 0, 1, 1),
+            "Couldn't finish Bloons TD 6."
+        );
+        assert_eq!(
+            compact_job_summary(CompactOp::Compress, "3 titles", 2, 1, 3),
+            "Compressed 2 of 3. 1 couldn't finish."
+        );
+        for s in [
+            compact_job_summary(CompactOp::Compress, "Bloons TD 6", 1, 0, 1),
+            compact_job_summary(CompactOp::Compress, "3 titles", 3, 0, 3),
+            compact_job_summary(CompactOp::Compress, "Bloons TD 6", 0, 1, 1),
+        ] {
+            assert!(!s.contains("Failed"), "{s}");
+            assert!(!s.contains("WOF"), "{s}");
+        }
+        assert_eq!(
+            flow_hint(CompactFlowPhase::Done, false),
+            "Click anywhere to return to the library."
+        );
     }
 }

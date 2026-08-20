@@ -195,7 +195,36 @@ pub fn apply_target_paths(root: &Path) -> Vec<PathBuf> {
 }
 
 const APPLY_BATCH_FILES: usize = 48;
+const LZX_APPLY_BATCH_FILES: usize = 8;
 const APPLY_BATCH_CHARS: usize = 20_000;
+/// Maximum / LZX: files this large get their own compact.exe so one slow
+/// encode cannot stall or fail a 48-file batch (BTD6 Unity bundles are 100MB–1GB).
+const LZX_ISOLATE_FILE_BYTES: u64 = 32 * 1024 * 1024;
+
+pub(crate) fn apply_batch_file_limit(algorithm: CompactAlgorithm) -> usize {
+    if algorithm == CompactAlgorithm::Lzx {
+        LZX_APPLY_BATCH_FILES
+    } else {
+        APPLY_BATCH_FILES
+    }
+}
+
+pub(crate) fn isolate_file_in_own_invocation(algorithm: CompactAlgorithm, file_len: u64) -> bool {
+    algorithm == CompactAlgorithm::Lzx && file_len >= LZX_ISOLATE_FILE_BYTES
+}
+
+/// Paths this invocation will pass to compact.exe (flags skipped).
+pub fn invocation_target_files(inv: &CompactInvocation) -> Vec<PathBuf> {
+    inv.args
+        .iter()
+        .filter(|a| !a.to_string_lossy().starts_with('/'))
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn file_len(path: &Path) -> u64 {
+    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
 
 fn batch_apply_files(
     op: CompactOp,
@@ -203,24 +232,35 @@ fn batch_apply_files(
     algorithm: CompactAlgorithm,
     force: bool,
 ) -> Vec<CompactInvocation> {
+    let max_files = apply_batch_file_limit(algorithm);
     let mut out = Vec::new();
     let mut batch: Vec<PathBuf> = Vec::new();
     let mut chars = 0usize;
+    let flush = |batch: &mut Vec<PathBuf>, out: &mut Vec<CompactInvocation>| {
+        if !batch.is_empty() {
+            out.push(build_wof_files_command_with(op, batch, algorithm, force));
+            batch.clear();
+        }
+    };
     for file in files {
         let add = file.as_os_str().len().saturating_add(3);
+        let isolate = isolate_file_in_own_invocation(algorithm, file_len(file));
         if !batch.is_empty()
-            && (batch.len() >= APPLY_BATCH_FILES || chars.saturating_add(add) > APPLY_BATCH_CHARS)
+            && (isolate
+                || batch.len() >= max_files
+                || chars.saturating_add(add) > APPLY_BATCH_CHARS)
         {
-            out.push(build_wof_files_command_with(op, &batch, algorithm, force));
-            batch.clear();
+            flush(&mut batch, &mut out);
             chars = 0;
         }
         chars = chars.saturating_add(add);
         batch.push(file.clone());
+        if isolate {
+            flush(&mut batch, &mut out);
+            chars = 0;
+        }
     }
-    if !batch.is_empty() {
-        out.push(build_wof_files_command_with(op, &batch, algorithm, force));
-    }
+    flush(&mut batch, &mut out);
     out
 }
 
@@ -665,6 +705,94 @@ mod tests {
         for inv in &first {
             assert!(!invocation_has_force_flag(inv), "{}", inv.display_cmdline());
         }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn lzx_uses_smaller_batches_and_isolates_large_files() {
+        assert_eq!(apply_batch_file_limit(CompactAlgorithm::Xpress8k), 48);
+        assert_eq!(apply_batch_file_limit(CompactAlgorithm::Lzx), 8);
+        assert!(!isolate_file_in_own_invocation(
+            CompactAlgorithm::Xpress8k,
+            32 * 1024 * 1024
+        ));
+        assert!(!isolate_file_in_own_invocation(
+            CompactAlgorithm::Lzx,
+            32 * 1024 * 1024 - 1
+        ));
+        assert!(isolate_file_in_own_invocation(
+            CompactAlgorithm::Lzx,
+            32 * 1024 * 1024
+        ));
+
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-lzx-batch-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        for i in 0..12 {
+            std::fs::write(root.join(format!("f{i}.dat")), vec![0u8; 32]).unwrap();
+        }
+
+        let xpress = build_apply_invocations_with(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Xpress8k,
+            false,
+        );
+        let lzx =
+            build_apply_invocations_with(CompactOp::Compress, &root, CompactAlgorithm::Lzx, false);
+        assert_eq!(xpress.len(), 1, "12 tiny files fit in one XPRESS batch");
+        assert!(
+            lzx.len() >= 2,
+            "LZX batches 8 files so 12 files need two invocations, got {}",
+            lzx.len()
+        );
+        for inv in &lzx {
+            let n = invocation_target_files(inv).len();
+            assert!(n <= 8, "{n}");
+            assert!(inv
+                .display_cmdline()
+                .to_ascii_uppercase()
+                .contains("/EXE:LZX"));
+        }
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn apply_skips_packed_video_music_bundles() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-bundle-skip-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("GameAssembly.dll"), b"dll").unwrap();
+        std::fs::write(root.join("videos_assets_all_2ab8.bundle"), b"vid").unwrap();
+        std::fs::write(root.join("music_assets_musictitle_4311.bundle"), b"mus").unwrap();
+        std::fs::write(root.join("asset_references_assets_all_13a2.bundle"), b"ref").unwrap();
+
+        let names: Vec<String> = apply_target_paths(&root)
+            .iter()
+            .filter_map(|p| p.file_name()?.to_str().map(|s| s.to_string()))
+            .collect();
+        assert!(names.iter().any(|n| n == "GameAssembly.dll"));
+        assert!(names
+            .iter()
+            .any(|n| n == "asset_references_assets_all_13a2.bundle"));
+        assert!(!names.iter().any(|n| n.starts_with("videos_")));
+        assert!(!names.iter().any(|n| n.starts_with("music_")));
 
         let _ = std::fs::remove_dir_all(&root);
     }

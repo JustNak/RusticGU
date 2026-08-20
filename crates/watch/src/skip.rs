@@ -197,9 +197,60 @@ pub fn folder_is_skipped(path: &Path) -> bool {
     })
 }
 
+/// Unity / addressable containers that can wrap already-compressed media.
+const MEDIA_CONTAINER_EXTS: &[&str] = &["bundle", "assets", "resource", "ress"];
+
+/// Filename tokens (split on non-alphanumerics) that mean packed video/audio.
+const PACKED_MEDIA_TOKENS: &[&str] = &[
+    "video",
+    "videos",
+    "movie",
+    "movies",
+    "cutscene",
+    "cutscenes",
+    "music",
+    "audio",
+    "sound",
+    "sounds",
+    "jingle",
+    "soundtrack",
+];
+
+/// True when this is a game-data container named as packed video/audio.
+///
+/// Same rule as `src/compact/skip.rs` so Live Compact does not WOF Unity
+/// `videos_*.bundle` / `music_*.bundle` files that never shrink.
+pub fn packed_media_container(path: &Path) -> bool {
+    match extension_of(path) {
+        Some(ext)
+            if MEDIA_CONTAINER_EXTS
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(&ext)) =>
+        {
+            filename_has_packed_media_token(path)
+        }
+        _ => false,
+    }
+}
+
+fn filename_has_packed_media_token(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .or_else(|| path.to_str())
+        .unwrap_or("")
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .any(|token| PACKED_MEDIA_TOKENS.contains(&token))
+}
+
 /// Whether incremental recompact / compact may consider this path.
 pub fn is_compact_candidate(path: &Path) -> bool {
-    !extension_is_skipped(path) && !folder_is_skipped(path)
+    !extension_is_skipped(path) && !folder_is_skipped(path) && !packed_media_container(path)
 }
 
 #[cfg(test)]
@@ -256,6 +307,23 @@ mod tests {
             );
             assert!(!is_compact_candidate(Path::new(name)));
         }
+    }
+
+    #[test]
+    fn unity_video_music_bundles_are_not_candidates() {
+        assert!(!is_compact_candidate(Path::new(
+            r"BloonsTD6_Data\StreamingAssets\aa\Full\videos_assets_all_2ab8.bundle"
+        )));
+        assert!(!is_compact_candidate(Path::new(
+            "music_assets_musictitle_4311.bundle"
+        )));
+        assert!(packed_media_container(Path::new("cutscene_intro.assets")));
+        assert!(is_compact_candidate(Path::new(
+            "asset_references_assets_all_13a2.bundle"
+        )));
+        assert!(is_compact_candidate(Path::new("GameAssembly.dll")));
+        assert!(is_compact_candidate(Path::new("resources.assets")));
+        assert!(is_compact_candidate(Path::new("AudioMixer.dll")));
     }
 
     #[test]

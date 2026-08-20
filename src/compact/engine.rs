@@ -7,7 +7,8 @@ use crate::settings::CompactAlgorithm;
 use crate::library::steam_updating_app_id;
 
 use super::command::{
-    build_apply_invocations_with_force, build_incremental_invocations, CompactOp,
+    build_apply_invocations_with_force, build_incremental_invocations,
+    build_wof_files_command_with, invocation_target_files, CompactInvocation, CompactOp,
 };
 use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
 
@@ -525,25 +526,32 @@ fn apply_wof(
         stderr: String::new(),
         code: Some(0),
     };
+    let mut last_err: Option<String> = None;
+    let mut any_ok = false;
 
     for inv in &invocations {
-        let file_n = inv
-            .args
-            .iter()
-            .filter(|a| !a.to_string_lossy().starts_with('/'))
-            .count();
-        let mut output = run_compact(inv, elevate)?;
-        if is_access_denied(&output) && !elevate {
-            progress(CompactProgress {
-                processed,
-                total,
-                message: "Access denied. Retrying elevated…".into(),
-            });
-            elevate = true;
-            output = run_compact(inv, true)?;
-        }
-        if !output.status_ok && !is_access_denied(&output) {
-            return interpret_output(op, output);
+        let file_n = invocation_target_files(inv).len().max(1);
+        progress(CompactProgress {
+            processed: processed.min(total),
+            total,
+            message: format!("WOF /EXE {processed}/{total}…"),
+        });
+        let mut run = CompactRun {
+            op,
+            algorithm,
+            force,
+            elevate: &mut elevate,
+            processed,
+            total,
+        };
+        match run_compact_resilient(&mut run, inv, &mut progress) {
+            Ok(output) => {
+                any_ok = true;
+                last_output = output;
+            }
+            Err(err) => {
+                last_err = Some(err);
+            }
         }
         processed = processed.saturating_add(file_n);
         progress(CompactProgress {
@@ -551,7 +559,6 @@ fn apply_wof(
             total,
             message: format!("WOF /EXE {processed}/{total}…"),
         });
-        last_output = output;
     }
 
     progress(CompactProgress {
@@ -559,6 +566,11 @@ fn apply_wof(
         total,
         message: "Finished.".into(),
     });
+    if let Some(err) = last_err {
+        if !any_ok {
+            return Err(err);
+        }
+    }
     interpret_output(op, last_output)
 }
 
@@ -585,17 +597,119 @@ fn interpret_output(op: CompactOp, output: CommandOutput) -> Result<CompactResul
             message: format!("{verb} with WOF /EXE."),
         })
     } else {
-        let detail = if output.stderr.trim().is_empty() {
-            output.stdout.trim().to_string()
-        } else {
-            output.stderr.trim().to_string()
-        };
-        Err(if detail.is_empty() {
-            format!("compact.exe failed (exit {}).", output.code.unwrap_or(-1))
-        } else {
-            detail
-        })
+        Err(output_error(&output))
     }
+}
+
+fn output_error(output: &CommandOutput) -> String {
+    let detail = if output.stderr.trim().is_empty() {
+        output.stdout.trim().to_string()
+    } else {
+        output.stderr.trim().to_string()
+    };
+    if detail.is_empty() {
+        format!("compact.exe failed (exit {}).", output.code.unwrap_or(-1))
+    } else {
+        detail
+    }
+}
+
+fn is_cmdline_too_long(err: &str) -> bool {
+    let e = err.to_ascii_lowercase();
+    e.contains("too long") || e.contains("os error 206")
+}
+
+struct CompactRun<'a> {
+    op: CompactOp,
+    algorithm: CompactAlgorithm,
+    force: bool,
+    elevate: &'a mut bool,
+    processed: usize,
+    total: usize,
+}
+
+fn run_compact_access(
+    run: &mut CompactRun<'_>,
+    inv: &CompactInvocation,
+    progress: &mut impl FnMut(CompactProgress),
+) -> Result<CommandOutput, String> {
+    let mut output = run_compact(inv, *run.elevate)?;
+    if is_access_denied(&output) && !*run.elevate {
+        progress(CompactProgress {
+            processed: run.processed,
+            total: run.total,
+            message: "Access denied. Retrying elevated…".into(),
+        });
+        *run.elevate = true;
+        output = run_compact(inv, true)?;
+    }
+    Ok(output)
+}
+
+/// Run one invocation. If the batch fails, retry files one-by-one. Maximum / LZX
+/// file failures fall back to XPRESS16K so one incompressible Unity bundle
+/// cannot abort the whole title.
+fn run_compact_resilient(
+    run: &mut CompactRun<'_>,
+    inv: &CompactInvocation,
+    progress: &mut impl FnMut(CompactProgress),
+) -> Result<CommandOutput, String> {
+    match run_compact_access(run, inv, progress) {
+        Ok(out) if out.status_ok => Ok(out),
+        Ok(out) => recover_failed_invocation(run, inv, progress, out),
+        Err(err) if is_cmdline_too_long(&err) => recover_failed_invocation(
+            run,
+            inv,
+            progress,
+            CommandOutput {
+                status_ok: false,
+                stdout: String::new(),
+                stderr: err,
+                code: Some(206),
+            },
+        ),
+        Err(err) => Err(err),
+    }
+}
+
+fn recover_failed_invocation(
+    run: &mut CompactRun<'_>,
+    inv: &CompactInvocation,
+    progress: &mut impl FnMut(CompactProgress),
+    failed: CommandOutput,
+) -> Result<CommandOutput, String> {
+    let files = invocation_target_files(inv);
+    if files.len() > 1 {
+        let mut last_ok = None;
+        let mut last_err = None;
+        for file in files {
+            let single = build_wof_files_command_with(
+                run.op,
+                std::slice::from_ref(&file),
+                run.algorithm,
+                run.force,
+            );
+            match run_compact_resilient(run, &single, progress) {
+                Ok(out) => last_ok = Some(out),
+                Err(err) => last_err = Some(err),
+            }
+        }
+        if let Some(out) = last_ok {
+            return Ok(out);
+        }
+        return Err(last_err.unwrap_or_else(|| output_error(&failed)));
+    }
+    if run.op == CompactOp::Compress && run.algorithm == CompactAlgorithm::Lzx && !files.is_empty()
+    {
+        let fallback =
+            build_wof_files_command_with(run.op, &files, CompactAlgorithm::Xpress16k, run.force);
+        match run_compact_access(run, &fallback, progress) {
+            Ok(out) if out.status_ok => return Ok(out),
+            Ok(out) => return Err(output_error(&out)),
+            Err(err) => return Err(err),
+        }
+    }
+    Err(output_error(&failed))
 }
 
 #[cfg(test)]
@@ -603,12 +717,28 @@ thread_local! {
     static COMPACT_SPAWN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+#[cfg(test)]
+fn test_lzx_fail_marker(inv: &CompactInvocation) -> bool {
+    let line = inv.display_cmdline().to_ascii_lowercase();
+    line.contains("rusticgu-lzx-fail") && line.contains("/exe:lzx")
+}
+
 fn run_compact(
     inv: &super::command::CompactInvocation,
     elevate: bool,
 ) -> Result<CommandOutput, String> {
     #[cfg(test)]
-    COMPACT_SPAWN_COUNT.with(|c| c.set(c.get().saturating_add(1)));
+    {
+        COMPACT_SPAWN_COUNT.with(|c| c.set(c.get().saturating_add(1)));
+        if test_lzx_fail_marker(inv) {
+            return Ok(CommandOutput {
+                status_ok: false,
+                stdout: String::new(),
+                stderr: "simulated LZX failure".into(),
+                code: Some(1),
+            });
+        }
+    }
     #[cfg(windows)]
     {
         windows_run(inv, elevate)
@@ -938,5 +1068,36 @@ mod tests {
         assert_eq!(COMPACT_SPAWN_COUNT.with(|c| c.get()), 0);
 
         let _ = std::fs::remove_dir_all(&library);
+    }
+
+    #[test]
+    fn maximum_lzx_file_failure_falls_back_and_still_finishes() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root =
+            std::env::temp_dir().join(format!("rusticgu-lzx-fb-{}-{}", std::process::id(), stamp));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("play.exe"), vec![0u8; 64]).unwrap();
+        std::fs::write(root.join("rusticgu-lzx-fail.dat"), vec![0u8; 64]).unwrap();
+
+        COMPACT_SPAWN_COUNT.with(|c| c.set(0));
+        let result = apply_compact_allowing_lzx(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Lzx,
+            false,
+            |_| {},
+        )
+        .expect("Maximum should finish via XPRESS16K fallback, not abort the title");
+        assert!(result.ok);
+        assert!(
+            COMPACT_SPAWN_COUNT.with(|c| c.get()) >= 2,
+            "batch fail must retry (got {})",
+            COMPACT_SPAWN_COUNT.with(|c| c.get())
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

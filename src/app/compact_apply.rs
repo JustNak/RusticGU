@@ -2,7 +2,7 @@
 
 use gpui::{Context, Window};
 
-use super::compact_flow::{CompactFlowPhase, TitleCompactStats};
+use super::compact_flow::{compact_job_summary, CompactFlowPhase, TitleCompactStats};
 use super::LibraryApp;
 use crate::compact::{
     apply_compact, apply_compact_allowing_lzx, apply_compact_force, decide_compact_apply,
@@ -363,18 +363,19 @@ impl LibraryApp {
     ) {
         self.compact_busy = false;
         self.live.set_compact_busy(false);
-        let verb = match op {
-            CompactOp::Compress => "Compressed",
-            CompactOp::Uncompress => "Restored",
-        };
-        let message = format!("{verb} {ok_n}/{total} with WOF /EXE. Failed {fail_n}.");
+        let message = compact_job_summary(op, label, ok_n, fail_n, total);
         let failed = fail_n > 0;
         self.poster_job = None;
         self.compact_progress = None;
         if let Some(flow) = self.compact_flow.as_mut() {
+            let had_err_detail = flow.failed && !flow.finish_message.is_empty();
             flow.phase = CompactFlowPhase::Done;
             flow.failed = failed || flow.failed;
-            flow.finish_message = message.clone();
+            if !flow.failed {
+                flow.finish_message = format!("Finished with {}.", flow.selected_level.label());
+            } else if !had_err_detail {
+                flow.finish_message = message.clone();
+            }
             flow.progress = None;
             flow.anim_gen = flow.anim_gen.saturating_add(1);
         } else if failed {

@@ -36,6 +36,9 @@ fn wav_dds_bnk_and_containers_eligible_media_skipped() {
             file("data.pak", true),
             file("Foo.uasset", true),
             file("cutscene.mp4", true),
+            file("videos_assets_all_2ab8.bundle", true),
+            file("music_assets_musictitle.bundle", true),
+            file("asset_references_assets_all.bundle", true),
             file("voice.wem", true),
             file("tex.ktx2", true),
             file("pack.zst", true),
@@ -54,6 +57,11 @@ fn wav_dds_bnk_and_containers_eligible_media_skipped() {
     assert!(names.iter().any(|n| n.ends_with(".pak")));
     assert!(names.iter().any(|n| n.ends_with(".uasset")));
     assert!(!names.iter().any(|n| n.ends_with(".mp4")));
+    assert!(!names.iter().any(|n| n.contains("videos_")));
+    assert!(!names.iter().any(|n| n.contains("music_assets")));
+    assert!(names
+        .iter()
+        .any(|n| n.ends_with("asset_references_assets_all.bundle")));
     assert!(!names.iter().any(|n| n.ends_with(".wem")));
     assert!(!names.iter().any(|n| n.ends_with(".ktx2")));
     assert!(!names.iter().any(|n| n.ends_with(".zst")));
