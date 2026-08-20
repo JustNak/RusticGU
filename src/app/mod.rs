@@ -55,6 +55,7 @@ use crate::settings::{Settings, WindowLayout};
 use crate::startup::launched_minimized;
 use crate::tray::SystemTray;
 use crate::updater::UpdateInfo;
+use compact_apply::{PosterJob, PosterJobKind};
 use compact_flow::CompactFlow;
 use toast::Toast;
 use widgets::render_vignette_overlay;
@@ -74,6 +75,7 @@ pub struct LibraryApp {
     pub(crate) library_error: Option<String>,
     pub(crate) compact_busy: bool,
     pub(crate) compact_progress: Option<CompactProgress>,
+    pub(crate) poster_job: Option<PosterJob>,
     pub(crate) compact_flow: Option<CompactFlow>,
     pub(crate) toasts: Vec<Toast>,
     pub(crate) next_toast_id: u64,
@@ -186,6 +188,7 @@ impl LibraryApp {
             library_error: None,
             compact_busy: false,
             compact_progress: None,
+            poster_job: None,
             compact_flow: None,
             toasts: Vec::new(),
             next_toast_id: 1,
@@ -525,7 +528,7 @@ impl LibraryApp {
         match op {
             CompactOp::Compress => self.open_compact_flow(window, cx),
             CompactOp::Uncompress => {
-                self.apply_compact_jobs(self.selected_titles(), op, None, window, cx)
+                self.apply_compact_jobs(self.selected_titles(), op, None, false, window, cx)
             }
         }
     }
@@ -560,11 +563,21 @@ impl LibraryApp {
         }
         self.compact_busy = true;
         self.live.set_compact_busy(true);
-        self.compact_progress = Some(CompactProgress {
-            processed: 0,
-            total: 1,
-            message: "Retrying last patch…".into(),
-        });
+        self.compact_progress = None;
+        if let Some(plan) = self.live.last_plan() {
+            if let Some(game) = self
+                .games
+                .iter()
+                .find(|g| g.install_path == plan.install)
+                .cloned()
+            {
+                self.poster_job = PosterJob::for_titles(
+                    std::slice::from_ref(&game),
+                    PosterJobKind::Compress,
+                    "Retrying last patch…",
+                );
+            }
+        }
         cx.notify();
         let live = self.live.clone();
         let (tx, rx) = async_channel::unbounded::<Result<String, String>>();
@@ -577,6 +590,7 @@ impl LibraryApp {
                     app.compact_busy = false;
                     app.live.set_compact_busy(false);
                     app.compact_progress = None;
+                    app.poster_job = None;
                     match result {
                         Ok(msg) => {
                             app.show_toast(msg, cx);
@@ -621,11 +635,12 @@ impl LibraryApp {
         }
         self.compact_busy = true;
         self.live.set_compact_busy(true);
-        self.compact_progress = Some(CompactProgress {
-            processed: 0,
-            total: 1,
-            message: "Walking back to XPRESS…".into(),
-        });
+        self.compact_progress = None;
+        self.poster_job = PosterJob::for_titles(
+            std::slice::from_ref(game),
+            PosterJobKind::Walkback,
+            "Walking back to XPRESS…",
+        );
         cx.notify();
         let allow = self.settings.allow_dstorage_override;
         let path = game.install_path.clone();
@@ -662,9 +677,14 @@ impl LibraryApp {
                         let finished = progress.message.contains("WOF /EXE")
                             || progress.message == "Finished.";
                         app.compact_progress = Some(progress.clone());
+                        if let Some(job) = app.poster_job.as_mut() {
+                            job.progress = progress;
+                        }
                         if finished {
                             app.compact_busy = false;
                             app.live.set_compact_busy(false);
+                            app.poster_job = None;
+                            app.compact_progress = None;
                             if let Err(msg) = open_title(&launch_game) {
                                 app.show_error_toast(msg, cx);
                             } else {
@@ -678,6 +698,7 @@ impl LibraryApp {
                         app.compact_busy = false;
                         app.live.set_compact_busy(false);
                         app.compact_progress = None;
+                        app.poster_job = None;
                         if let Err(msg) = open_title(&launch_game) {
                             app.show_error_toast(format!("{err}: {msg}"), cx);
                         } else {

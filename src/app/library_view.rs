@@ -1,9 +1,11 @@
 //! Cover-art gallery + overlay compact actions.
 
+use std::time::Duration;
+
 use gpui::{
-    div, hsla, img, prelude::FluentBuilder, px, ClickEvent, Context, Hsla, InteractiveElement,
-    IntoElement, ObjectFit, ParentElement, SharedString, StatefulInteractiveElement, Styled,
-    StyledImage,
+    div, hsla, img, prelude::FluentBuilder, pulsating_between, px, Animation, AnimationExt,
+    ClickEvent, Context, Hsla, InteractiveElement, IntoElement, ObjectFit, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, StyledImage,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -13,11 +15,13 @@ use gpui_component::{
 };
 use stores::StoreId;
 
+use super::compact_apply::{PosterJob, PosterJobKind};
 use super::widgets::styled_progress;
 use super::FilterKind;
 use super::LibraryApp;
 use crate::appearance::title_tint;
 use crate::branding::{APP_LOGO_DARK, APP_LOGO_LIGHT};
+use crate::compact::CompactProgress;
 use crate::covers::Monogram;
 use crate::format::{format_bytes, format_size_pair};
 use crate::library::{title_is_compact_excluded, LibraryStore, LibraryTitle};
@@ -34,11 +38,8 @@ impl LibraryApp {
         let selected = self.selected_ids.clone();
         let scanning = self.library_scanning;
         let error = self.library_error.clone();
-        let progress = if self.compact_flow.is_some() {
-            None
-        } else {
-            self.compact_progress.clone()
-        };
+        let poster_job = self.poster_job.clone();
+        let progress_style = self.settings.progress_style;
         let busy = self.compact_busy || self.compact_flow.is_some();
         let filter = self.filter;
         let selected_n = self.selected_titles().len();
@@ -121,27 +122,6 @@ impl LibraryApp {
                         .child(msg),
                 )
             })
-            .when_some(progress, |el, p| {
-                el.child(
-                    v_flex()
-                        .gap_1()
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(theme.muted_foreground)
-                                .child(p.message),
-                        )
-                        .child(styled_progress(
-                            if p.total == 0 {
-                                0.0
-                            } else {
-                                (p.processed as f32 / p.total as f32) * 100.0
-                            },
-                            theme.progress_bar,
-                            self.settings.progress_style,
-                        )),
-                )
-            })
             .child(if games.is_empty() && !scanning {
                 self.render_empty_library(cx).into_any_element()
             } else {
@@ -170,6 +150,8 @@ impl LibraryApp {
                                         busy,
                                         width: poster_w,
                                         height: poster_h,
+                                        job: poster_job_view(poster_job.as_ref(), &id),
+                                        progress_style,
                                     },
                                     cx,
                                 )
@@ -253,6 +235,27 @@ struct PosterChrome {
     busy: bool,
     width: f32,
     height: f32,
+    job: Option<PosterJobView>,
+    progress_style: crate::settings::ProgressStyle,
+}
+
+#[derive(Debug, Clone)]
+struct PosterJobView {
+    kind: PosterJobKind,
+    waiting: bool,
+    progress: CompactProgress,
+}
+
+fn poster_job_view(job: Option<&PosterJob>, id: &str) -> Option<PosterJobView> {
+    let job = job?;
+    if !job.covers(id) {
+        return None;
+    }
+    Some(PosterJobView {
+        kind: job.kind,
+        waiting: job.waiting(id),
+        progress: job.progress.clone(),
+    })
 }
 
 fn render_poster_card(
@@ -277,7 +280,10 @@ fn render_poster_card(
     let poster_h = chrome.height;
     let selected = chrome.selected;
     let busy = chrome.busy;
+    let job = chrome.job;
+    let progress_style = chrome.progress_style;
     let group = card_dom_id(&id);
+    let job_active = job.is_some();
     let name = game.name.clone();
     let caption = caption_size(&game);
     let tint = title_tint(&name, theme.is_dark());
@@ -346,9 +352,15 @@ fn render_poster_card(
                         .text_color(badge_color)
                         .child(badge),
                 )
-                .child(render_poster_veil(&id, group, hover_spec, busy, cx))
-                .when(poster_shows_compacted_badge(compacted, excluded), |el| {
-                    el.child(render_compacted_badge(&id, &theme))
+                .when(
+                    poster_shows_compacted_badge(compacted, excluded) && !job_active,
+                    |el| el.child(render_compacted_badge(&id, &theme)),
+                )
+                .when_some(job, |el, job| {
+                    el.child(render_poster_job_overlay(&id, job, &theme, progress_style))
+                })
+                .when(!job_active, |el| {
+                    el.child(render_poster_veil(&id, group, hover_spec, busy, cx))
                 }),
         )
         .child(
@@ -521,6 +533,79 @@ fn header_compact_label(selected_n: usize) -> Option<String> {
     (selected_n > 1).then(|| format!("Compress {selected_n}"))
 }
 
+fn poster_job_label(kind: PosterJobKind, waiting: bool) -> &'static str {
+    if waiting {
+        return "Waiting…";
+    }
+    match kind {
+        PosterJobKind::Decompress => "Restoring",
+        PosterJobKind::Change => "Changing",
+        PosterJobKind::Compress => "Compressing",
+        PosterJobKind::Walkback => "Walking back",
+    }
+}
+
+fn poster_job_percent(job: &PosterJobView) -> f32 {
+    if job.waiting || job.progress.total == 0 {
+        return 0.0;
+    }
+    let pct = (job.progress.processed as f32 / job.progress.total as f32) * 100.0;
+    if matches!(job.kind, PosterJobKind::Decompress) && job.progress.processed == 0 {
+        return 28.0;
+    }
+    pct.clamp(0.0, 100.0)
+}
+
+fn render_poster_job_overlay(
+    id: &str,
+    job: PosterJobView,
+    theme: &gpui_component::Theme,
+    style: crate::settings::ProgressStyle,
+) -> impl IntoElement {
+    let label = poster_job_label(job.kind, job.waiting);
+    let pct = poster_job_percent(&job);
+    let message = if job.waiting {
+        "Waiting…".to_string()
+    } else {
+        job.progress.message.clone()
+    };
+    v_flex()
+        .id(SharedString::from(format!("poster-job-{id}")))
+        .absolute()
+        .inset_0()
+        .justify_end()
+        .p_2()
+        .gap_1p5()
+        .bg(hsla(0.54, 0.30, 0.04, 0.72))
+        .child(
+            div()
+                .text_xs()
+                .font_semibold()
+                .text_color(theme.foreground)
+                .child(label),
+        )
+        .child(
+            div()
+                .w_full()
+                .text_xs()
+                .text_color(theme.muted_foreground)
+                .truncate()
+                .child(message),
+        )
+        .child(
+            div()
+                .w_full()
+                .child(styled_progress(pct, theme.progress_bar, style))
+                .with_animation(
+                    SharedString::from(format!("poster-job-pulse-{id}")),
+                    Animation::new(Duration::from_secs(2))
+                        .repeat()
+                        .with_easing(pulsating_between(0.72, 1.0)),
+                    |this, delta| this.opacity(delta),
+                ),
+        )
+}
+
 fn render_poster_veil(
     id: &str,
     group: SharedString,
@@ -633,9 +718,11 @@ fn render_poster_veil(
 #[cfg(test)]
 mod tests {
     use super::{
-        header_compact_label, poster_hover_spec, poster_shows_compacted_badge, poster_size,
-        store_badge_color, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
+        header_compact_label, poster_hover_spec, poster_job_label, poster_job_percent,
+        poster_job_view, poster_shows_compacted_badge, poster_size, store_badge_color, PosterJob,
+        PosterJobKind, PosterJobView, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
     };
+    use crate::compact::CompactProgress;
     use crate::library::LibraryStore;
     use crate::settings::UiDensity;
     use stores::StoreId;
@@ -700,5 +787,42 @@ mod tests {
         assert_eq!(header_compact_label(1), None);
         assert_eq!(header_compact_label(2).as_deref(), Some("Compress 2"));
         assert_eq!(header_compact_label(5).as_deref(), Some("Compress 5"));
+    }
+
+    #[test]
+    fn poster_job_overlay_uses_file_progress_and_waiting() {
+        let job = PosterJob {
+            title_ids: vec!["steam:1".into(), "steam:2".into()],
+            current_id: "steam:1".into(),
+            kind: PosterJobKind::Change,
+            progress: CompactProgress {
+                processed: 40,
+                total: 80,
+                message: "WOF /EXE 40/80…".into(),
+            },
+        };
+        let current = poster_job_view(Some(&job), "steam:1").unwrap();
+        assert!(!current.waiting);
+        assert!((poster_job_percent(&current) - 50.0).abs() < 0.01);
+        assert_eq!(poster_job_label(current.kind, current.waiting), "Changing");
+        let queued = poster_job_view(Some(&job), "steam:2").unwrap();
+        assert!(queued.waiting);
+        assert_eq!(poster_job_percent(&queued), 0.0);
+        assert!(poster_job_view(Some(&job), "steam:3").is_none());
+
+        let restoring = PosterJobView {
+            kind: PosterJobKind::Decompress,
+            waiting: false,
+            progress: CompactProgress {
+                processed: 0,
+                total: 400,
+                message: "Starting WOF uncompact…".into(),
+            },
+        };
+        assert!(poster_job_percent(&restoring) > 0.0);
+        assert_eq!(
+            poster_job_label(PosterJobKind::Decompress, false),
+            "Restoring"
+        );
     }
 }

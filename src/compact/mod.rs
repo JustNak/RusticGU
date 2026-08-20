@@ -10,7 +10,8 @@ mod skip;
 #[allow(unused_imports)]
 pub use command::{
     apply_target_paths, build_apply_invocations, build_apply_invocations_with,
-    build_compact_command, build_incremental_invocations, build_wof_files_command, CompactOp,
+    build_apply_invocations_with_force, build_compact_command, build_incremental_invocations,
+    build_wof_files_command, CompactOp,
 };
 #[allow(unused_imports)]
 pub use command::{
@@ -19,9 +20,9 @@ pub use command::{
 };
 #[allow(unused_imports)]
 pub use engine::{
-    apply_compact, apply_compact_allowing_lzx, apply_incremental, estimate_compact,
-    estimate_compact_with, measure_compact_sizes, preflight, CompactEstimate, CompactProgress,
-    CompactRefuse, CompactSizeSnapshot,
+    apply_compact, apply_compact_allowing_lzx, apply_compact_force, apply_incremental,
+    estimate_compact, estimate_compact_with, measure_compact_sizes, preflight, CompactEstimate,
+    CompactProgress, CompactRefuse, CompactSizeSnapshot,
 };
 #[allow(unused_imports)]
 pub use engine::{

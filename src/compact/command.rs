@@ -61,11 +61,27 @@ pub fn build_wof_files_command(
     files: &[PathBuf],
     algorithm: CompactAlgorithm,
 ) -> CompactInvocation {
+    build_wof_files_command_with(op, files, algorithm, false)
+}
+
+/// WOF command using the algorithm as given, optionally `/F` to rewrite already-compressed files.
+///
+/// `/F` is for an explicit Change-method apply only. Incremental live compact and first
+/// compress must keep `force == false`.
+pub fn build_wof_files_command_with(
+    op: CompactOp,
+    files: &[PathBuf],
+    algorithm: CompactAlgorithm,
+    force: bool,
+) -> CompactInvocation {
     let mut args = Vec::new();
     match op {
         CompactOp::Compress => {
             args.push(OsString::from("/C"));
             args.push(OsString::from(format!("/EXE:{}", algorithm.exe_flag())));
+            if force {
+                args.push(OsString::from("/F"));
+            }
         }
         CompactOp::Uncompress => {
             args.push(OsString::from("/U"));
@@ -99,6 +115,17 @@ pub fn build_apply_invocations_with(
     algorithm: CompactAlgorithm,
     coerce_live: bool,
 ) -> Vec<CompactInvocation> {
+    build_apply_invocations_with_force(op, root, algorithm, coerce_live, false)
+}
+
+/// Apply invocations, with `/F` when `force` is set so Change-method can rewrite.
+pub fn build_apply_invocations_with_force(
+    op: CompactOp,
+    root: &Path,
+    algorithm: CompactAlgorithm,
+    coerce_live: bool,
+    force: bool,
+) -> Vec<CompactInvocation> {
     let algorithm = if coerce_live {
         algorithm.for_live_library()
     } else {
@@ -107,7 +134,7 @@ pub fn build_apply_invocations_with(
     match op {
         CompactOp::Compress => {
             let files = collect_included_files(root);
-            batch_apply_files(op, &files, algorithm)
+            batch_apply_files(op, &files, algorithm, force)
         }
         CompactOp::Uncompress => vec![build_uncompress_root_command(root)],
     }
@@ -131,7 +158,7 @@ pub fn build_incremental_invocations(
         })
         .filter(|p| p.is_file() && !should_skip(p))
         .collect();
-    batch_apply_files(CompactOp::Compress, &resolved, algorithm)
+    batch_apply_files(CompactOp::Compress, &resolved, algorithm, false)
 }
 
 /// True when this invocation asks `compact.exe` to force a full rewrite (`/F`).
@@ -169,6 +196,7 @@ fn batch_apply_files(
     op: CompactOp,
     files: &[PathBuf],
     algorithm: CompactAlgorithm,
+    force: bool,
 ) -> Vec<CompactInvocation> {
     let mut out = Vec::new();
     let mut batch: Vec<PathBuf> = Vec::new();
@@ -178,7 +206,7 @@ fn batch_apply_files(
         if !batch.is_empty()
             && (batch.len() >= APPLY_BATCH_FILES || chars.saturating_add(add) > APPLY_BATCH_CHARS)
         {
-            out.push(build_wof_files_command(op, &batch, algorithm));
+            out.push(build_wof_files_command_with(op, &batch, algorithm, force));
             batch.clear();
             chars = 0;
         }
@@ -186,7 +214,7 @@ fn batch_apply_files(
         batch.push(file.clone());
     }
     if !batch.is_empty() {
-        out.push(build_wof_files_command(op, &batch, algorithm));
+        out.push(build_wof_files_command_with(op, &batch, algorithm, force));
     }
     out
 }
@@ -534,6 +562,51 @@ mod tests {
         assert!(joined.contains("new_patch.vpk"), "{joined}");
         assert!(!joined.contains("movie.mp4"), "{joined}");
         assert!(!joined.contains("slot.sav"), "{joined}");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn change_method_apply_uses_force_and_keeps_algorithm() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-change-cmd-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("play.exe"), vec![0u8; 64]).unwrap();
+
+        let invs = build_apply_invocations_with_force(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Xpress16k,
+            false,
+            true,
+        );
+        assert!(!invs.is_empty());
+        for inv in &invs {
+            let line = inv.display_cmdline().to_ascii_uppercase();
+            assert!(invocation_has_force_flag(inv), "{line}");
+            assert!(line.contains("/F"), "{line}");
+            assert!(line.contains("/EXE:XPRESS16K"), "{line}");
+            assert!(!line.contains("/S"), "{line}");
+            assert!(is_wof_exe_command(inv));
+            assert!(!is_lznt1_command(inv));
+        }
+
+        let first = build_apply_invocations_with(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Xpress16k,
+            false,
+        );
+        for inv in &first {
+            assert!(!invocation_has_force_flag(inv), "{}", inv.display_cmdline());
+        }
 
         let _ = std::fs::remove_dir_all(&root);
     }

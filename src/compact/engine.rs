@@ -6,7 +6,9 @@ use crate::settings::CompactAlgorithm;
 
 use crate::library::steam_updating_app_id;
 
-use super::command::{build_apply_invocations_with, build_incremental_invocations, CompactOp};
+use super::command::{
+    build_apply_invocations_with_force, build_incremental_invocations, CompactOp,
+};
 use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
@@ -418,6 +420,7 @@ pub fn apply_compact(
         algorithm.for_live_library(),
         allow_dstorage,
         None,
+        false,
         progress,
     )
 }
@@ -430,7 +433,20 @@ pub fn apply_compact_allowing_lzx(
     allow_dstorage: bool,
     progress: impl FnMut(CompactProgress),
 ) -> Result<CompactResult, String> {
-    apply_wof(op, root, algorithm, allow_dstorage, None, progress)
+    apply_wof(op, root, algorithm, allow_dstorage, None, false, progress)
+}
+
+/// User-initiated Change-method: rewrite already-compressed files (`/F`).
+///
+/// Incremental live compact must not use this. Maximum still keeps LZX.
+pub fn apply_compact_force(
+    op: CompactOp,
+    root: &Path,
+    algorithm: CompactAlgorithm,
+    allow_dstorage: bool,
+    progress: impl FnMut(CompactProgress),
+) -> Result<CompactResult, String> {
+    apply_wof(op, root, algorithm, allow_dstorage, None, true, progress)
 }
 
 /// Incremental recompact of named files. Live algorithm only; never `/F` or root `/S`.
@@ -447,6 +463,7 @@ pub fn apply_incremental(
         algorithm.for_live_library(),
         allow_dstorage,
         Some(files),
+        false,
         progress,
     )
 }
@@ -457,6 +474,7 @@ fn apply_wof(
     algorithm: CompactAlgorithm,
     allow_dstorage: bool,
     explicit_files: Option<&[PathBuf]>,
+    force: bool,
     mut progress: impl FnMut(CompactProgress),
 ) -> Result<CompactResult, String> {
     preflight(root, allow_dstorage).map_err(|e| e.to_string())?;
@@ -484,7 +502,7 @@ fn apply_wof(
         Some(files) => build_incremental_invocations(root, files, algorithm),
         None => {
             let coerce_live = algorithm.is_live();
-            build_apply_invocations_with(op, root, algorithm, coerce_live)
+            build_apply_invocations_with_force(op, root, algorithm, coerce_live, force)
         }
     };
     if invocations.is_empty() {
