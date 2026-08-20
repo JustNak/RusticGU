@@ -56,6 +56,23 @@ impl LibraryStore {
         }
     }
 
+    /// Poster glyph for this launcher (`assets/icons/store-*.svg`, Simple Icons CC0).
+    ///
+    /// `None` means the title has no launcher to identify — omit the badge.
+    pub fn icon_path(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Steam => "icons/store-steam.svg",
+            Self::Extra(StoreId::Epic) => "icons/store-epic.svg",
+            Self::Extra(StoreId::Gog) => "icons/store-gog.svg",
+            Self::Extra(StoreId::Ea) => "icons/store-ea.svg",
+            Self::Extra(StoreId::Ubisoft) => "icons/store-ubisoft.svg",
+            Self::Extra(StoreId::Riot) => "icons/store-riot.svg",
+            Self::Extra(StoreId::Battlenet) => "icons/store-battlenet.svg",
+            Self::Extra(StoreId::Itch) => "icons/store-itch.svg",
+            Self::Extra(StoreId::XboxGames) => "icons/store-xbox.svg",
+        })
+    }
+
     pub fn is_steam(self) -> bool {
         matches!(self, Self::Steam)
     }
@@ -181,5 +198,33 @@ mod tests {
     fn probe_flag_is_the_compacted_source() {
         assert!(title(true, Some(20), Some(20)).is_compacted());
         assert!(!title(false, Some(10), Some(4)).is_compacted());
+    }
+
+    #[test]
+    fn known_launchers_ship_store_icons() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+        for store in [
+            LibraryStore::Steam,
+            LibraryStore::Extra(StoreId::Epic),
+            LibraryStore::Extra(StoreId::Gog),
+            LibraryStore::Extra(StoreId::Ea),
+            LibraryStore::Extra(StoreId::Ubisoft),
+            LibraryStore::Extra(StoreId::Riot),
+            LibraryStore::Extra(StoreId::Battlenet),
+            LibraryStore::Extra(StoreId::Itch),
+            LibraryStore::Extra(StoreId::XboxGames),
+        ] {
+            let rel = store
+                .icon_path()
+                .unwrap_or_else(|| panic!("{} should have a launcher icon", store.badge()));
+            let bytes = std::fs::read(root.join(rel))
+                .unwrap_or_else(|err| panic!("missing {rel} for {}: {err}", store.badge()));
+            let text = String::from_utf8(bytes).expect("store icon is utf-8 svg");
+            assert!(text.contains("<svg"), "{rel} should be an svg");
+            assert!(
+                text.contains("currentColor"),
+                "{rel} should tint via currentColor"
+            );
+        }
     }
 }

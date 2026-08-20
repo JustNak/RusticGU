@@ -2,6 +2,17 @@
 
 use std::time::Duration;
 
+use super::compact_apply::{PosterJob, PosterJobKind};
+use super::widgets::styled_progress;
+use super::FilterKind;
+use super::LibraryApp;
+use crate::appearance::title_tint;
+use crate::branding::{APP_LOGO_DARK, APP_LOGO_LIGHT};
+use crate::compact::CompactProgress;
+use crate::covers::Monogram;
+use crate::format::{format_bytes, format_size_pair};
+use crate::library::{title_is_compact_excluded, LibraryTitle};
+use crate::settings::UiDensity;
 use gpui::{
     div, hsla, img, prelude::FluentBuilder, pulsating_between, px, Animation, AnimationExt,
     ClickEvent, Context, Hsla, InteractiveElement, IntoElement, ObjectFit, ParentElement,
@@ -13,19 +24,6 @@ use gpui_component::{
     tooltip::Tooltip,
     v_flex, ActiveTheme, Disableable, Icon, Sizable, StyledExt,
 };
-use stores::StoreId;
-
-use super::compact_apply::{PosterJob, PosterJobKind};
-use super::widgets::styled_progress;
-use super::FilterKind;
-use super::LibraryApp;
-use crate::appearance::title_tint;
-use crate::branding::{APP_LOGO_DARK, APP_LOGO_LIGHT};
-use crate::compact::CompactProgress;
-use crate::covers::Monogram;
-use crate::format::{format_bytes, format_size_pair};
-use crate::library::{title_is_compact_excluded, LibraryStore, LibraryTitle};
-use crate::settings::UiDensity;
 
 const POSTER_RADIUS: f32 = 12.0;
 const POSTER_GAP: f32 = 10.0;
@@ -271,8 +269,8 @@ fn render_poster_card(
     let tip = format!("{}: {size} ({path})", game.name);
     let has_art = cover.is_some();
     let monogram = Monogram::from_title(&game);
-    let badge = game.store.badge();
-    let badge_color = store_badge_color(game.store);
+    let store_icon = game.store.icon_path();
+    let store_name = game.store.badge();
     let excluded = title_is_compact_excluded(&game);
     let compacted = game.is_compacted();
     let hover_spec = poster_hover_spec(compacted, excluded);
@@ -303,13 +301,6 @@ fn render_poster_card(
                 .h(px(poster_h))
                 .rounded(px(POSTER_RADIUS))
                 .overflow_hidden()
-                .border_2()
-                .border_color(if selected {
-                    theme.primary
-                } else {
-                    theme.border.opacity(0.22)
-                })
-                .hover(|s| s.border_color(theme.primary.opacity(0.55)))
                 .bg(if has_art { theme.secondary } else { tint })
                 .cursor_pointer()
                 .tooltip({
@@ -323,35 +314,20 @@ fn render_poster_card(
                         this.select_game_click(id.clone(), multi, cx);
                     })
                 })
-                .child(if has_art {
-                    div().size_full().into_any_element()
-                } else {
-                    render_monogram_tile(&monogram, badge, badge_color, theme.foreground)
-                        .into_any_element()
-                })
-                .when_some(cover, |el, image| {
-                    el.child(
-                        img(image)
-                            .absolute()
-                            .inset_0()
-                            .size_full()
-                            .object_fit(ObjectFit::Cover),
-                    )
-                })
-                .child(
-                    div()
+                .child(if let Some(image) = cover {
+                    img(image)
                         .absolute()
-                        .top(px(8.))
-                        .right(px(8.))
-                        .px_1p5()
-                        .py_0p5()
-                        .rounded(px(4.))
-                        .bg(hsla(0.0, 0.0, 0.04, 0.62))
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(badge_color)
-                        .child(badge),
-                )
+                        .inset_0()
+                        .size_full()
+                        .object_fit(ObjectFit::Cover)
+                        .into_any_element()
+                } else {
+                    render_monogram_tile(&monogram, theme.foreground).into_any_element()
+                })
+                .child(render_poster_frame_ring(selected, group.clone(), &theme))
+                .when_some(store_icon, |el, path| {
+                    el.child(render_store_badge(&id, path, store_name))
+                })
                 .when(
                     poster_shows_compacted_badge(compacted, excluded) && !job_active,
                     |el| el.child(render_compacted_badge(&id, &theme)),
@@ -398,20 +374,6 @@ fn render_poster_card(
         )
 }
 
-fn store_badge_color(store: LibraryStore) -> Hsla {
-    match store {
-        LibraryStore::Steam => hsla(0.55, 0.78, 0.64, 1.0),
-        LibraryStore::Extra(StoreId::Epic) => hsla(0.60, 0.85, 0.55, 1.0),
-        LibraryStore::Extra(StoreId::Gog) => hsla(0.90, 0.62, 0.55, 1.0),
-        LibraryStore::Extra(StoreId::Ea) => hsla(0.00, 0.78, 0.58, 1.0),
-        LibraryStore::Extra(StoreId::Ubisoft) => hsla(0.58, 0.90, 0.52, 1.0),
-        LibraryStore::Extra(StoreId::Riot) => hsla(0.99, 0.72, 0.52, 1.0),
-        LibraryStore::Extra(StoreId::Battlenet) => hsla(0.55, 0.95, 0.53, 1.0),
-        LibraryStore::Extra(StoreId::Itch) => hsla(0.00, 0.85, 0.62, 1.0),
-        LibraryStore::Extra(StoreId::XboxGames) => hsla(0.33, 0.72, 0.42, 1.0),
-    }
-}
-
 fn caption_size(game: &LibraryTitle) -> String {
     match (game.on_disk_bytes, game.logical_bytes) {
         (Some(disk), Some(logical)) if disk + logical / 20 < logical => format_bytes(disk),
@@ -419,6 +381,44 @@ fn caption_size(game: &LibraryTitle) -> String {
         (None, Some(logical)) => format_bytes(logical),
         _ => String::new(),
     }
+}
+
+/// Hairline drawn on top of the cover. Putting the border on the clip frame
+/// shrinks the image and leaves a gap in the rounded corners.
+fn render_poster_frame_ring(
+    selected: bool,
+    group: SharedString,
+    theme: &gpui_component::Theme,
+) -> impl IntoElement {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded(px(POSTER_RADIUS))
+        .border_2()
+        .border_color(if selected {
+            theme.primary
+        } else {
+            theme.border.opacity(0.22)
+        })
+        .group_hover(group, |s| s.border_color(theme.primary.opacity(0.55)))
+}
+
+fn render_store_badge(id: &str, icon_path: &'static str, name: &'static str) -> impl IntoElement {
+    div()
+        .id(SharedString::from(format!("poster-store-{id}")))
+        .absolute()
+        .top(px(8.))
+        .right(px(8.))
+        .tooltip({
+            let tip = SharedString::from(name);
+            move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+        })
+        .child(
+            Icon::empty()
+                .path(icon_path)
+                .with_size(px(18.))
+                .text_color(hsla(0.0, 0.0, 1.0, 0.95)),
+        )
 }
 
 fn render_compacted_badge(id: &str, theme: &gpui_component::Theme) -> impl IntoElement {
@@ -448,12 +448,7 @@ fn render_compacted_badge(id: &str, theme: &gpui_component::Theme) -> impl IntoE
         )
 }
 
-fn render_monogram_tile(
-    monogram: &Monogram,
-    badge: &'static str,
-    badge_color: Hsla,
-    fg: Hsla,
-) -> impl IntoElement {
+fn render_monogram_tile(monogram: &Monogram, fg: Hsla) -> impl IntoElement {
     v_flex()
         .id(SharedString::from(format!("monogram-{}", monogram.title)))
         .size_full()
@@ -475,16 +470,6 @@ fn render_monogram_tile(
                 .text_color(fg)
                 .opacity(0.92)
                 .child(monogram.title.clone()),
-        )
-        .child(
-            div()
-                .px_1p5()
-                .py_0p5()
-                .rounded(px(4.))
-                .bg(hsla(0.0, 0.0, 0.0, 0.28))
-                .text_xs()
-                .text_color(badge_color)
-                .child(badge),
         )
 }
 
@@ -719,8 +704,8 @@ fn render_poster_veil(
 mod tests {
     use super::{
         header_compact_label, poster_hover_spec, poster_job_label, poster_job_percent,
-        poster_job_view, poster_shows_compacted_badge, poster_size, store_badge_color, PosterJob,
-        PosterJobKind, PosterJobView, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
+        poster_job_view, poster_shows_compacted_badge, poster_size, PosterJob, PosterJobKind,
+        PosterJobView, POSTER_GAP, POSTER_RADIUS, UNSELECTED_DIM,
     };
     use crate::compact::CompactProgress;
     use crate::library::LibraryStore;
@@ -740,13 +725,19 @@ mod tests {
     }
 
     #[test]
-    fn store_badges_use_distinct_hues() {
-        let steam = store_badge_color(LibraryStore::Steam);
-        let xbox = store_badge_color(LibraryStore::Extra(StoreId::XboxGames));
-        let itch = store_badge_color(LibraryStore::Extra(StoreId::Itch));
-        assert!((steam.h - xbox.h).abs() > 0.1);
-        assert!((steam.h - itch.h).abs() > 0.1);
-        assert!(steam.s > 0.4 && xbox.s > 0.4);
+    fn store_badge_is_an_icon_for_known_launchers() {
+        assert_eq!(
+            LibraryStore::Steam.icon_path(),
+            Some("icons/store-steam.svg")
+        );
+        assert_eq!(
+            LibraryStore::Extra(StoreId::Epic).icon_path(),
+            Some("icons/store-epic.svg")
+        );
+        assert_eq!(
+            LibraryStore::Extra(StoreId::XboxGames).icon_path(),
+            Some("icons/store-xbox.svg")
+        );
     }
 
     #[test]
