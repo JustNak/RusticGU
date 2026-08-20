@@ -135,6 +135,15 @@ mod tests {
             "icons/undo-2.svg",
             "icons/rotate-cw.svg",
             "icons/info.svg",
+            "icons/store-steam.svg",
+            "icons/store-epic.svg",
+            "icons/store-gog.svg",
+            "icons/store-ea.svg",
+            "icons/store-ubisoft.svg",
+            "icons/store-riot.svg",
+            "icons/store-battlenet.svg",
+            "icons/store-itch.svg",
+            "icons/store-xbox.svg",
         ] {
             let bytes = Assets::load_embedded(path)
                 .unwrap_or_else(|| panic!("missing embedded asset: {path}"));

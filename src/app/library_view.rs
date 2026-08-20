@@ -271,7 +271,8 @@ fn render_poster_card(
     let tip = format!("{}: {size} ({path})", game.name);
     let has_art = cover.is_some();
     let monogram = Monogram::from_title(&game);
-    let badge = game.store.badge();
+    let store_icon = game.store.icon_path();
+    let store_name = game.store.badge();
     let badge_color = store_badge_color(game.store);
     let excluded = title_is_compact_excluded(&game);
     let compacted = game.is_compacted();
@@ -326,8 +327,7 @@ fn render_poster_card(
                 .child(if has_art {
                     div().size_full().into_any_element()
                 } else {
-                    render_monogram_tile(&monogram, badge, badge_color, theme.foreground)
-                        .into_any_element()
+                    render_monogram_tile(&monogram, theme.foreground).into_any_element()
                 })
                 .when_some(cover, |el, image| {
                     el.child(
@@ -338,20 +338,9 @@ fn render_poster_card(
                             .object_fit(ObjectFit::Cover),
                     )
                 })
-                .child(
-                    div()
-                        .absolute()
-                        .top(px(8.))
-                        .right(px(8.))
-                        .px_1p5()
-                        .py_0p5()
-                        .rounded(px(4.))
-                        .bg(hsla(0.0, 0.0, 0.04, 0.62))
-                        .text_xs()
-                        .font_semibold()
-                        .text_color(badge_color)
-                        .child(badge),
-                )
+                .when_some(store_icon, |el, path| {
+                    el.child(render_store_badge(&id, path, store_name, badge_color))
+                })
                 .when(
                     poster_shows_compacted_badge(compacted, excluded) && !job_active,
                     |el| el.child(render_compacted_badge(&id, &theme)),
@@ -421,6 +410,35 @@ fn caption_size(game: &LibraryTitle) -> String {
     }
 }
 
+fn render_store_badge(
+    id: &str,
+    icon_path: &'static str,
+    name: &'static str,
+    badge_color: Hsla,
+) -> impl IntoElement {
+    h_flex()
+        .id(SharedString::from(format!("poster-store-{id}")))
+        .absolute()
+        .top(px(8.))
+        .right(px(8.))
+        .items_center()
+        .justify_center()
+        .px_1p5()
+        .py_0p5()
+        .rounded(px(6.))
+        .bg(hsla(0.0, 0.0, 0.04, 0.62))
+        .tooltip({
+            let tip = SharedString::from(name);
+            move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+        })
+        .child(
+            Icon::empty()
+                .path(icon_path)
+                .with_size(px(13.))
+                .text_color(badge_color),
+        )
+}
+
 fn render_compacted_badge(id: &str, theme: &gpui_component::Theme) -> impl IntoElement {
     h_flex()
         .id(SharedString::from(format!("poster-compacted-{id}")))
@@ -448,12 +466,7 @@ fn render_compacted_badge(id: &str, theme: &gpui_component::Theme) -> impl IntoE
         )
 }
 
-fn render_monogram_tile(
-    monogram: &Monogram,
-    badge: &'static str,
-    badge_color: Hsla,
-    fg: Hsla,
-) -> impl IntoElement {
+fn render_monogram_tile(monogram: &Monogram, fg: Hsla) -> impl IntoElement {
     v_flex()
         .id(SharedString::from(format!("monogram-{}", monogram.title)))
         .size_full()
@@ -475,16 +488,6 @@ fn render_monogram_tile(
                 .text_color(fg)
                 .opacity(0.92)
                 .child(monogram.title.clone()),
-        )
-        .child(
-            div()
-                .px_1p5()
-                .py_0p5()
-                .rounded(px(4.))
-                .bg(hsla(0.0, 0.0, 0.0, 0.28))
-                .text_xs()
-                .text_color(badge_color)
-                .child(badge),
         )
 }
 
@@ -747,6 +750,22 @@ mod tests {
         assert!((steam.h - xbox.h).abs() > 0.1);
         assert!((steam.h - itch.h).abs() > 0.1);
         assert!(steam.s > 0.4 && xbox.s > 0.4);
+    }
+
+    #[test]
+    fn store_badge_is_an_icon_for_known_launchers() {
+        assert_eq!(
+            LibraryStore::Steam.icon_path(),
+            Some("icons/store-steam.svg")
+        );
+        assert_eq!(
+            LibraryStore::Extra(StoreId::Epic).icon_path(),
+            Some("icons/store-epic.svg")
+        );
+        assert_eq!(
+            LibraryStore::Extra(StoreId::XboxGames).icon_path(),
+            Some("icons/store-xbox.svg")
+        );
     }
 
     #[test]
