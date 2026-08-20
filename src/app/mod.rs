@@ -39,7 +39,7 @@ use crate::appearance::{
     apply_appearance, film_grain_image, noise_enabled, vignette_edge_alpha, vignette_enabled,
 };
 use crate::compact::{
-    apply_compact, estimate_compact, estimate_compact_with, CompactOp, CompactProgress,
+    apply_compact_force, estimate_compact, estimate_compact_with, CompactOp, CompactProgress,
 };
 use crate::library::{
     algorithm_from_policy, scan_library, shelf_policy_for, steam_title_id,
@@ -648,7 +648,7 @@ impl LibraryApp {
         let launch_game = game.clone();
         let (tx, rx) = async_channel::unbounded::<Result<CompactProgress, String>>();
         std::thread::spawn(move || {
-            let result = apply_compact(
+            let result = apply_compact_force(
                 CompactOp::Compress,
                 &path,
                 CompactAlgorithm::Xpress,
