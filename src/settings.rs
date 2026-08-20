@@ -168,8 +168,8 @@ impl UiDensity {
 #[serde(rename_all = "snake_case")]
 pub enum CornerRadiusScale {
     Sharp,
-    #[default]
     Default,
+    #[default]
     Soft,
 }
 
@@ -201,9 +201,9 @@ impl CornerRadiusScale {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgressStyle {
-    #[default]
     Solid,
     Soft,
+    #[default]
     Glow,
     Segmented,
 }
@@ -412,10 +412,10 @@ impl Default for Settings {
             window_transparency: 0,
             backdrop_blur: false,
             ui_density: UiDensity::Comfortable,
-            corner_radius: CornerRadiusScale::Default,
+            corner_radius: CornerRadiusScale::Soft,
             reduce_motion: false,
-            vignette_intensity: 18,
-            progress_style: ProgressStyle::Solid,
+            vignette_intensity: 22,
+            progress_style: ProgressStyle::Glow,
             window_layout: WindowLayout::default(),
             close_to_tray: true,
             launch_at_startup: false,
@@ -494,6 +494,8 @@ mod tests {
         assert_eq!(s.accent_preset, AccentPreset::Cyan);
         assert!((s.accent_hue - 186.0).abs() < f32::EPSILON);
         assert!(!s.include_xbox_games);
+        assert_eq!(s.progress_style, ProgressStyle::Glow);
+        assert_eq!(s.corner_radius, CornerRadiusScale::Soft);
         assert_eq!(s.compact_algorithm, CompactAlgorithm::Xpress8k);
         assert_eq!(s.compact_algorithm.exe_flag(), "XPRESS8K");
         assert!(CompactAlgorithm::LIVE

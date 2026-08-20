@@ -1,4 +1,4 @@
-use gpui::{div, px, Hsla, IntoElement, ParentElement, Styled};
+use gpui::{div, px, relative, Hsla, IntoElement, ParentElement, Styled};
 use gpui_component::{h_flex, progress::Progress};
 
 use crate::settings::ProgressStyle;
@@ -22,12 +22,18 @@ pub(crate) fn styled_progress(value: f32, color: Hsla, style: ProgressStyle) -> 
             .w_full()
             .rounded_full()
             .into_any_element(),
-        ProgressStyle::Glow => Progress::new()
-            .value(value)
-            .bg(color)
-            .h(px(9.))
+        ProgressStyle::Glow => div()
             .w_full()
+            .h(px(8.))
             .rounded_full()
+            .bg(color.opacity(0.18))
+            .child(
+                div()
+                    .h_full()
+                    .w(relative((value / 100.0).clamp(0.0, 1.0)))
+                    .rounded_full()
+                    .bg(color),
+            )
             .into_any_element(),
         ProgressStyle::Segmented => {
             const SEGMENTS: u32 = 12;
