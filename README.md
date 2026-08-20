@@ -40,7 +40,7 @@ Nightly (unsigned, may be unstable) is an on-demand GitHub pre-release for testi
 
 | Asset | What it contains |
 | --- | --- |
-| **`RusticGU-windows-x64-setup.exe`** | **Recommended** — NSIS installer (Start Menu, uninstaller, optional app-data cleanup) |
+| **`RusticGU-windows-x64-setup.exe`** | **Recommended:** NSIS installer (Start Menu, uninstaller, optional app-data cleanup) |
 | **`RusticGU-windows-x64.zip`** | Portable desktop app (`rusticgu.exe` + `rusticgu-updater.exe`) |
 
 ### Install (recommended)
@@ -67,7 +67,7 @@ Settings and window state live under `%APPDATA%\RusticGU\`. Uninstall via Apps &
 
 RusticGU is a **game-library compact tool** for Windows. It uses transparent WOF `compact /EXE` so titles stay playable. It is not LZNT1, not a rewriter, and not for WindowsApps. There is no savings-% promise.
 
-- Game-launcher UI — teal-cyan + gold chrome (Rust + [GPUI](https://gpui.rs/) + [gpui-component](https://github.com/longbridge/gpui-component))
+- Game-launcher UI with teal-cyan + gold chrome (Rust + [GPUI](https://gpui.rs/) + [gpui-component](https://github.com/longbridge/gpui-component))
 - Steam library cards (logical vs on-disk size when cheap to read)
 - Compact / uncompact a selected game folder (default **XPRESS8K**)
 - Tray flyout: compact vs inflated summary, pause Live Compact, one-click recompact, open main window
@@ -179,8 +179,8 @@ Output: `dist-release/RusticGU-windows-x64-setup.exe`.
 ## Data location
 
 - Windows: `%APPDATA%\RusticGU\`
-  - `settings.json` — prefs (camelCase), including update channel
-  - `state.json` — window placement and UI state
+  - `settings.json`: prefs (camelCase), including update channel
+  - `state.json`: window placement and UI state
 
 ## Continuous integration
 
@@ -208,4 +208,4 @@ That attribution requirement is part of the MIT license terms for this repositor
 
 RusticGU is released under the **[MIT License](LICENSE)**.
 
-You may use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the software — including for commercial purposes — provided you include the copyright notice and permission notice in all copies or substantial portions of the Software.
+You may use, copy, modify, merge, publish, distribute, sublicense, and sell copies of the software, including for commercial purposes, provided you include the copyright notice and permission notice in all copies or substantial portions of the Software.

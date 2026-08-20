@@ -3,7 +3,7 @@
 //! Without `requestedExecutionLevel=asInvoker`, Windows Installer Detection
 //! treats filenames containing "update" as requiring elevation. CreateProcess
 //! then fails with ERROR_ELEVATION_REQUIRED (740) when the main app is not
-//! elevated — which is how self-update used to break.
+//! elevated, which is how self-update used to break.
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {

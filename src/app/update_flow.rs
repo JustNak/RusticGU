@@ -2,11 +2,11 @@
 //!
 //! Toast stages (interactive + silent when an update exists):
 //! 1. **Checking for update…**
-//! 2a. **You're up to date** — or —
-//! 2b. **Update available vX.Y.Z** `[Update]`
+//! 2a. **You're up to date**, or
+//! 2b. **Update available vX.Y.Z** `[Update]`.
 //! 3. On Update: flush state, snapshot What’s new, spawn **RusticGU Updater**, quit.
 //! 4. Updater downloads, runs NSIS `/S`, relaunches the main app.
-//! 5. **What’s new** — post-relaunch dialog with the release changelog.
+//! 5. **What’s new**: post-relaunch dialog with the release changelog.
 //!
 //! Channel (`UpdateChannel`) selects Stable (`/releases/latest`) vs Nightly
 //! (`vX.Y.Z-nightly.*` pre-releases). Switching channels offers that stream’s
@@ -327,7 +327,7 @@ impl LibraryApp {
         };
 
         if let Err(message) = launch_updater(&opts) {
-            // Handoff failed — discard the snapshot so a normal start does not
+            // Handoff failed: discard the snapshot so a normal start does not
             // claim an update that never applied.
             let _ = clear_pending_whats_new(&self.paths);
             self.update_busy = false;

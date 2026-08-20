@@ -1,7 +1,7 @@
 //! Embed Windows version resources so Task Manager / Explorer show "RusticGU".
 //!
 //! UAC / DPI manifests for the main app come from GPUI (`windows-manifest`).
-//! The dedicated updater embeds its own asInvoker manifest — see
+//! The dedicated updater embeds its own asInvoker manifest; see
 //! `apps/updater/build.rs` and `assets/windows/app.manifest`.
 
 fn main() {

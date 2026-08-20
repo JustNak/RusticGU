@@ -46,7 +46,7 @@ pub enum TickEvent {
     Unlocked { title_id: String },
 }
 
-/// Live Compact watcher. Drive it with [`LiveWatch::tick`] — no thread sleep.
+/// Live Compact watcher. Drive it with [`LiveWatch::tick`]. There is no thread sleep.
 pub struct LiveWatch<S, C, I> {
     pub status: S,
     pub compact: C,

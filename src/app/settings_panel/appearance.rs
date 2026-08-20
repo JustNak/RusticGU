@@ -99,7 +99,7 @@ impl LibraryApp {
                             ),
                         cx,
                     ))
-                    // Accent — preset dots + distinct Custom (rainbow ring)
+                    // Accent: preset dots + distinct Custom (rainbow ring)
                     .child(
                         v_flex()
                             .gap_2()
@@ -222,7 +222,7 @@ impl LibraryApp {
                                 )
                             }),
                     )
-                    // Live preview strip — near theme/accent so color changes are obvious
+                    // Live preview strip: near theme/accent so color changes are obvious
                     .child(
                         v_flex()
                             .gap_2()

@@ -6,14 +6,14 @@
 //!    (that key **only**).
 //! 2. itch: butlerd `CaveStats.localLastRunAt`.
 //!
-//! ACF `LastUpdated` is last **patch**, not last play — [`last_played_from_acf`]
+//! ACF `LastUpdated` is last **patch**, not last play, so [`last_played_from_acf`]
 //! always returns `None`.
 //!
 //! Epic / GOG / Xbox / Battle.net / EA / Ubisoft / Riot have **no** safe
 //! last-play signal. Do not invent recency from mtime, `INSTALLDATE`, or
 //! similar. Those stores stay [`None`].
 //!
-//! Shelf policy: [`None`] is a documented conservative default — treat as
+//! Shelf policy: [`None`] is a documented conservative default. Treat it as
 //! **cold / LZX-eligible**, never a fabricated timestamp.
 
 use std::collections::BTreeMap;

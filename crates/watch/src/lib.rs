@@ -4,7 +4,7 @@
 //! ACF `StateFlags` (and download byte counters) plus an injected downloading
 //! probe. While a title is patching it **locks** compact; after it leaves that
 //! state it requests an **incremental** recompact of only new or uncompressed
-//! files — never `compact /F`.
+//! files, and never `compact /F`.
 //!
 //! The real WOF / `compact.exe` work lives in Engineer 3's crate. We only
 //! decide *when* and *which paths*.

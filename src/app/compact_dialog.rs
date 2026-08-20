@@ -192,26 +192,6 @@ impl Render for CompactLevelPicker {
 }
 
 impl LibraryApp {
-    pub(crate) fn begin_title_change_method(
-        &mut self,
-        id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.select_game(id, cx);
-        self.open_compact_picker(CompactPickerMode::ChangeMethod, window, cx);
-    }
-
-    pub(crate) fn begin_title_decompress(
-        &mut self,
-        id: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.select_game(id, cx);
-        self.open_decompress_dialog(window, cx);
-    }
-
     pub(crate) fn open_compact_picker(
         &mut self,
         mode: CompactPickerMode,

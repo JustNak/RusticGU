@@ -17,7 +17,7 @@ use gpui_component::{
 
 use super::widgets::styled_progress;
 use super::LibraryApp;
-use crate::compact::{CompactLevel, CompactProgress, CompactSizeSnapshot};
+use crate::compact::{CompactLevel, CompactOp, CompactProgress, CompactSizeSnapshot};
 use crate::format::format_bytes;
 use crate::library::LibraryTitle;
 
@@ -29,6 +29,12 @@ pub(crate) enum CompactFlowPhase {
     Working,
     Done,
     Leaving,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompactFlowKind {
+    Compress,
+    Change,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +56,7 @@ impl TitleCompactStats {
 #[derive(Debug, Clone)]
 pub(crate) struct CompactFlow {
     pub titles: Vec<LibraryTitle>,
+    pub kind: CompactFlowKind,
     pub phase: CompactFlowPhase,
     pub selected_level: CompactLevel,
     pub progress: Option<CompactProgress>,
@@ -60,9 +67,10 @@ pub(crate) struct CompactFlow {
 }
 
 impl CompactFlow {
-    fn new(titles: Vec<LibraryTitle>) -> Self {
+    fn new(titles: Vec<LibraryTitle>, kind: CompactFlowKind) -> Self {
         Self {
             titles,
+            kind,
             phase: CompactFlowPhase::Choose,
             selected_level: CompactLevel::Medium,
             progress: None,
@@ -104,10 +112,39 @@ impl LibraryApp {
         cx: &mut Context<Self>,
     ) {
         self.select_game(id, cx);
-        self.open_compact_flow(window, cx);
+        self.open_compact_flow_kind(CompactFlowKind::Compress, window, cx);
     }
 
-    pub(crate) fn open_compact_flow(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn begin_title_change_method(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_game(id, cx);
+        self.open_compact_flow_kind(CompactFlowKind::Change, window, cx);
+    }
+
+    pub(crate) fn begin_title_decompress(
+        &mut self,
+        id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_game(id, cx);
+        self.start_compact(CompactOp::Uncompress, window, cx);
+    }
+
+    pub(crate) fn open_compact_flow(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_compact_flow_kind(CompactFlowKind::Compress, window, cx);
+    }
+
+    pub(crate) fn open_compact_flow_kind(
+        &mut self,
+        kind: CompactFlowKind,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.compact_flow.is_some() || self.compact_busy {
             self.show_toast("A compact job is already running.", cx);
             return;
@@ -117,7 +154,7 @@ impl LibraryApp {
             self.show_toast("Select a game first.", cx);
             return;
         }
-        self.compact_flow = Some(CompactFlow::new(titles));
+        self.compact_flow = Some(CompactFlow::new(titles, kind));
         cx.notify();
     }
 
@@ -169,10 +206,14 @@ impl LibraryApp {
         {
             return;
         }
+        let kind = self.compact_flow.as_ref().map(|f| f.kind);
         if let Some(flow) = self.compact_flow.as_mut() {
             flow.selected_level = level;
         }
-        self.apply_compact_level(level, window, cx);
+        match kind {
+            Some(CompactFlowKind::Change) => self.apply_change_level(level, window, cx),
+            _ => self.apply_compact_level(level, window, cx),
+        }
     }
 
     pub(crate) fn render_compact_flow(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -196,7 +237,7 @@ impl LibraryApp {
         ));
         let progress_style = self.settings.progress_style;
         let hint = flow_hint(visual, flow.failed);
-        let heading = flow_heading(&flow.titles, visual);
+        let heading = flow_heading(&flow.titles, flow.kind, visual);
 
         div()
             .id("compact-flow-root")
@@ -628,14 +669,29 @@ fn phase_key(phase: CompactFlowPhase) -> &'static str {
     }
 }
 
-fn flow_heading(titles: &[LibraryTitle], phase: CompactFlowPhase) -> String {
-    match (phase, titles) {
-        (CompactFlowPhase::Choose, [title]) => format!("Compress {}", title.name),
-        (CompactFlowPhase::Choose, _) => format!("Compress {} titles", titles.len()),
-        (CompactFlowPhase::Working, [title]) => title.name.clone(),
-        (CompactFlowPhase::Working, _) => format!("Compressing {} titles", titles.len()),
-        (CompactFlowPhase::Done | CompactFlowPhase::Leaving, [title]) => title.name.clone(),
-        (CompactFlowPhase::Done | CompactFlowPhase::Leaving, _) => {
+fn flow_heading(titles: &[LibraryTitle], kind: CompactFlowKind, phase: CompactFlowPhase) -> String {
+    match (kind, phase, titles) {
+        (CompactFlowKind::Change, CompactFlowPhase::Choose, [title]) => {
+            format!("Change {}", title.name)
+        }
+        (CompactFlowKind::Change, CompactFlowPhase::Choose, _) => {
+            format!("Change {} titles", titles.len())
+        }
+        (CompactFlowKind::Compress, CompactFlowPhase::Choose, [title]) => {
+            format!("Compress {}", title.name)
+        }
+        (CompactFlowKind::Compress, CompactFlowPhase::Choose, _) => {
+            format!("Compress {} titles", titles.len())
+        }
+        (_, CompactFlowPhase::Working, [title]) => title.name.clone(),
+        (CompactFlowKind::Change, CompactFlowPhase::Working, _) => {
+            format!("Changing {} titles", titles.len())
+        }
+        (CompactFlowKind::Compress, CompactFlowPhase::Working, _) => {
+            format!("Compressing {} titles", titles.len())
+        }
+        (_, CompactFlowPhase::Done | CompactFlowPhase::Leaving, [title]) => title.name.clone(),
+        (_, CompactFlowPhase::Done | CompactFlowPhase::Leaving, _) => {
             format!("{} titles", titles.len())
         }
     }
@@ -644,12 +700,12 @@ fn flow_heading(titles: &[LibraryTitle], phase: CompactFlowPhase) -> String {
 fn flow_hint(phase: CompactFlowPhase, failed: bool) -> &'static str {
     match phase {
         CompactFlowPhase::Choose => "Pick a strength to start. You can cancel until then.",
-        CompactFlowPhase::Working => "Keep this window open until compression finishes.",
+        CompactFlowPhase::Working => "Keep this window open until the job finishes.",
         CompactFlowPhase::Done | CompactFlowPhase::Leaving if failed => {
             "Click anywhere to return to the library."
         }
         CompactFlowPhase::Done | CompactFlowPhase::Leaving => {
-            "Click anywhere — or any button — to return."
+            "Click anywhere or any button to return."
         }
     }
 }
@@ -726,7 +782,7 @@ mod tests {
             CompactFlowPhase::Working,
             CompactFlowPhase::Done,
         ] {
-            blob.push_str(&flow_heading(&one, phase));
+            blob.push_str(&flow_heading(&one, CompactFlowKind::Compress, phase));
             blob.push(' ');
             blob.push_str(flow_hint(phase, false));
         }
@@ -741,16 +797,26 @@ mod tests {
         let upper = blob.to_ascii_uppercase();
         assert!(!upper.contains("XPRESS"), "{blob}");
         assert!(!upper.contains("LZX"), "{blob}");
-        assert!(flow_heading(&one, CompactFlowPhase::Choose).contains("Apex Legends"));
+        assert!(
+            flow_heading(&one, CompactFlowKind::Compress, CompactFlowPhase::Choose)
+                .contains("Apex Legends")
+        );
         assert_eq!(
-            flow_heading(&[], CompactFlowPhase::Choose),
+            flow_heading(&[], CompactFlowKind::Compress, CompactFlowPhase::Choose),
             "Compress 0 titles"
+        );
+        assert_eq!(
+            flow_heading(&one, CompactFlowKind::Change, CompactFlowPhase::Choose),
+            "Change Apex Legends"
         );
     }
 
     #[test]
     fn choose_is_cancellable_done_is_dismissable() {
-        let flow = CompactFlow::new(vec![title("Apex Legends", Some(10), Some(10))]);
+        let flow = CompactFlow::new(
+            vec![title("Apex Legends", Some(10), Some(10))],
+            CompactFlowKind::Compress,
+        );
         assert!(flow.can_cancel());
         assert!(!flow.can_dismiss());
         let mut working = flow.clone();

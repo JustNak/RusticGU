@@ -19,7 +19,7 @@ pub struct PathRoots {
     pub riot_installs: Option<PathBuf>,
     /// `ProgramData/Battle.net/Agent` (JSON product records only).
     pub battlenet_agent: Option<PathBuf>,
-    /// itch config dir (`%APPDATA%/itch`) — never `butler.db`.
+    /// itch config dir (`%APPDATA%/itch`), never `butler.db`.
     pub itch_config: Option<PathBuf>,
     /// Explicit XboxGames library folders. Used only when opt-in.
     pub xbox_games_roots: Vec<PathBuf>,

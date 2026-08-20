@@ -81,11 +81,11 @@ fn folder_match(install: Option<&Path>, markers: &[String]) -> bool {
         .any(|name| markers.iter().any(|m| name.eq_ignore_ascii_case(m)))
 }
 
-/// Confirmed default denylist — researcher-locked.
+/// Confirmed default denylist (researcher-locked).
 ///
-/// * **Guild Wars 2** — ArenaNet self-rewriter (`Gw2-64` / `local.dat`).
-/// * **Secret World Legends** — Funcom self-updating client (confirmed).
-/// * **The Lord of the Rings Online** — patcher freezes if files stay
+/// * **Guild Wars 2**: ArenaNet self-rewriter (`Gw2-64` / `local.dat`).
+/// * **Secret World Legends**: Funcom self-updating client (confirmed).
+/// * **The Lord of the Rings Online**: patcher freezes if files stay
 ///   WOF-compressed; must decompress to patch (must-not-stay-compressed).
 ///
 /// **Not** on the default list: ARK, ESO (unconfirmed). Do not add them here.

@@ -99,7 +99,7 @@ pub fn cascade_hwnd(hwnd: windows::Win32::Foundation::HWND, index: usize) {
             return;
         }
 
-        // `rcWork` excludes the taskbar / docked bars — better than full `rcMonitor`.
+        // `rcWork` excludes the taskbar / docked bars, which is better than full `rcMonitor`.
         let work = info.rcWork;
         let (x, y) = cascade_origin(
             work.left,
@@ -312,7 +312,7 @@ pub fn flyout_safe_work(
 
 /// Compute a flyout origin that sits above `anchor` and stays inside `work`.
 ///
-/// `work` is `(left, top, right, bottom)` in screen pixels (`rcWork` — already
+/// `work` is `(left, top, right, bottom)` in screen pixels (`rcWork` already
 /// excludes the taskbar). `anchor` is `(x, y, w, h)` of the tray icon or cursor.
 /// `extra_clearance` is added above the work-area bottom so the panel cannot
 /// clip into the taskbar.

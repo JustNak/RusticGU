@@ -3,7 +3,7 @@
 //! A positive check requires **both** `dstorage.dll` **and** `dstoragecore.dll`
 //! in the provided filename set (typically the install root listing).
 //!
-//! # Caveats — do not over-claim
+//! # Caveats: do not over-claim
 //!
 //! - Presence of the DLLs **does not** mean the game actually uses DirectStorage.
 //!   Titles may ship the redistributable unused, or load it only on some paths.
@@ -24,7 +24,7 @@ pub const DSTORAGE_CORE_DLL: &str = "dstoragecore.dll";
 pub enum DirectStorageHint {
     /// Both official runtime DLLs were seen. **Not** proof of actual use.
     BothDllsPresent,
-    /// Zero or one of the two DLLs — including custom/renamed/Game Pass misses.
+    /// Zero or one of the two DLLs, including custom/renamed/Game Pass misses.
     NotDetected,
 }
 

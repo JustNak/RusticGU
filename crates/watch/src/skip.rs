@@ -6,7 +6,7 @@
 //!
 //! Do **not** hard-skip: `wav`, `dds`, `bnk`.
 //! Do **not** skip container/game-data formats: `vpk`, `vpak`, `pak`, `cpk`,
-//! `arc`, `dat`, `bin`, `uasset`, `uexp`, `ubulk` — unless the path sits under
+//! `arc`, `dat`, `bin`, `uasset`, `uexp`, `ubulk`, unless the path sits under
 //! a save folder ([`SKIP_SAVE_FOLDER_SEGMENTS`]).
 //!
 //! Do **not** skip every Unreal `Saved` tree; only `Saved\SaveGames` /
@@ -102,7 +102,7 @@ pub const SKIP_FOLDER_SEGMENTS: &[&str] = &[
 /// In-tree save directory segments (case-insensitive).
 ///
 /// `dat` / `bin` stay extension-eligible **unless** a path contains one of
-/// these. `Saved` alone is **not** listed — Unreal `Saved\Config` / `Logs` /
+/// these. `Saved` alone is **not** listed. Unreal `Saved\Config` / `Logs` /
 /// `Paks` must remain compact-eligible. `Saved\SaveGames` and `Saved\Save`
 /// are matched as a two-segment pair in [`folder_is_skipped`].
 pub const SKIP_SAVE_FOLDER_SEGMENTS: &[&str] = &[

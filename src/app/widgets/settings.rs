@@ -13,7 +13,7 @@ use gpui_component::{
 use super::super::LibraryApp;
 use crate::settings::AccentPreset;
 
-/// Field title — stronger than hints so forms scan as Label → control → help.
+/// Field title. Stronger than hints so forms scan as Label → control → help.
 /// Used by add dialog and other compact forms (`text_xs`).
 #[allow(dead_code)]
 pub(crate) fn field_label(text: &'static str, cx: &mut App) -> impl IntoElement {
@@ -152,7 +152,7 @@ pub(crate) fn accent_preset_swatch(
 ) -> impl IntoElement {
     let label = preset.label();
     let tip: SharedString = if preset == AccentPreset::Default {
-        "Default — stock theme color".into()
+        "Default: stock theme color".into()
     } else {
         label.to_string().into()
     };
@@ -209,14 +209,14 @@ pub(crate) fn accent_preset_swatch(
         )
 }
 
-/// Custom mixer entry: white disc + paintbrush — clearly not a solid preset.
+/// Custom mixer entry: white disc + paintbrush, clearly not a solid preset.
 pub(crate) fn accent_custom_swatch(
     selected: bool,
     _custom_color: Hsla,
     theme: &Theme,
     cx: &mut Context<LibraryApp>,
 ) -> impl IntoElement {
-    let tip: SharedString = "Custom — mix your own accent".into();
+    let tip: SharedString = "Custom: mix your own accent".into();
     // White plate always; brush in dark ink so it stays readable on light/dark UI.
     let plate = hsla(0.0, 0.0, 0.98, 1.0);
     let brush = hsla(0.0, 0.0, 0.22, 1.0);

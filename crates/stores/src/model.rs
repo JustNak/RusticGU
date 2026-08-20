@@ -40,7 +40,7 @@ impl std::fmt::Display for StoreId {
 /// not cross-store dedupe.
 ///
 /// `last_played_unix` is filled **only** from itch `CaveStats.localLastRunAt`.
-/// Epic / GOG / Xbox / Battle.net / EA / Ubisoft / Riot stay `None` — there
+/// Epic / GOG / Xbox / Battle.net / EA / Ubisoft / Riot stay `None`; there
 /// is no safe last-play signal (do not use mtime / INSTALLDATE).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscoveredTitle {

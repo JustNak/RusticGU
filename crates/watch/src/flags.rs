@@ -5,7 +5,7 @@
 //!
 //! | Value | Meaning |
 //! |------:|---------|
-//! | 4 | `FULLY_INSTALLED` — installed and idle |
+//! | 4 | `FULLY_INSTALLED`: installed and idle |
 //! | 6 | `FULLY_INSTALLED \| UPDATE_REQUIRED` |
 //! | 1026 | `UPDATE_REQUIRED \| UPDATE_STARTED` (download just kicked off) |
 //! | 4 \| 1048576 | installed + `DOWNLOADING` |
@@ -30,7 +30,7 @@
 //! download bytes, and the Steam downloading probe false.
 //!
 //! `APP_RUNNING` (8192) and `BACKUP_RUNNING` (4096) do **not** lock compact
-//! by themselves — those are not patch/download states.
+//! by themselves; those are not patch/download states.
 //!
 //! Hypothesis confirmed against Open Steamworks: update/download/validating
 //! bits lock; fully-installed-and-idle unlocks.

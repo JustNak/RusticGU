@@ -256,7 +256,7 @@ pub fn show_main_window(window: &gpui::Window) {
 /// Restore/show a main window by raw HWND (safe without a GPUI `Window`).
 ///
 /// Used when the UI is hidden to tray and may not paint until the HWND is shown
-/// again — tray and second-instance activate must not wait on `Render`.
+/// again. Tray and second-instance activate must not wait on `Render`.
 pub fn show_main_window_hwnd(hwnd: isize) {
     #[cfg(windows)]
     {
@@ -332,7 +332,7 @@ mod windows_impl {
     /// Custom callback message delivered to our message-only window.
     const WM_TRAYICON: u32 = WM_APP + 40;
     /// UI → tray thread: drain pending balloon queue and apply.
-    /// `LPARAM` is unused — payloads live in [`PendingBalloons`].
+    /// `LPARAM` is unused; payloads live in [`PendingBalloons`].
     const WM_SHOW_BALLOON: u32 = WM_APP + 41;
 
     /// Shared queue of balloon payloads. Always owns the heap data; `PostMessage`
@@ -494,7 +494,7 @@ mod windows_impl {
             write_utf16_buf(&mut nid.szTip, APP_NAME);
 
             if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
-                // HWND never published — show_notification cannot race here.
+                // HWND is never published, so show_notification cannot race here.
                 let _ = DestroyWindow(hwnd);
                 let _ = drain_pending(&pending_balloons);
                 return Err("Shell_NotifyIcon NIM_ADD failed".into());
@@ -516,7 +516,7 @@ mod windows_impl {
                 );
             }
 
-            // Publish only when the icon is live and version is attempted — balloons
+            // Publish only when the icon is live and version is attempted, so balloons
             // must not NIM_MODIFY a non-existent icon.
             hwnd_slot.store(hwnd.0 as isize, Ordering::SeqCst);
 

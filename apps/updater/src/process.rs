@@ -85,7 +85,7 @@ pub fn wait_for_process_exit(
             if wait == WAIT_TIMEOUT {
                 continue;
             }
-            // Unexpected wait result — treat as exited to avoid stuck updater.
+            // Unexpected wait result: treat as exited to avoid a stuck updater.
             unsafe {
                 let _ = CloseHandle(handle);
             }

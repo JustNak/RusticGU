@@ -209,7 +209,7 @@ pub fn auto_excluded_title(path: &Path) -> Option<String> {
     })
 }
 
-/// DirectStorage runtime in the tree — compacting this install can break IO.
+/// DirectStorage runtime in the tree. Compacting this install can break IO.
 pub fn tree_contains_dstorage(root: &Path) -> bool {
     contains_any_file_named(root, DSTORAGE_FILENAMES)
 }

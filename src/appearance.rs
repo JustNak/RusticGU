@@ -34,7 +34,7 @@ pub fn resolve_theme_mode(theme: AppTheme, window: Option<&Window>, cx: &App) ->
 
 /// Map the transparency slider (0–100) to window alpha with a hard floor.
 ///
-/// - `0` → fully opaque (`1.0`) — default, no transparency
+/// - `0` → fully opaque (`1.0`), the default with no transparency
 /// - `100` → [`MIN_WINDOW_OPACITY`]% alpha (never fully invisible)
 /// - values in between interpolate linearly
 pub fn effective_window_opacity_alpha(transparency_pct: u8) -> f32 {
@@ -78,7 +78,7 @@ pub fn custom_accent_hsla(hue: f32, saturation: f32, lightness: f32) -> Hsla {
 
 /// Swatch color for the settings accent picker (always vivid enough to read).
 ///
-/// `stock_primary` is the live theme primary — used for **Default**, which does
+/// `stock_primary` is the live theme primary, used for **Default**, which does
 /// not override accents (`resolve_accent_color` → `None`). On dark themes that
 /// is often near-white (same as the Primary button), not the Blue preset.
 pub fn accent_swatch_color(
@@ -273,7 +273,7 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
         apply_launcher_surfaces(theme);
         apply_accent(theme, &settings);
         apply_shape_and_density(theme, &settings);
-        // On Windows, layered alpha handles translucency — keep surfaces solid.
+        // On Windows, layered alpha handles translucency, so keep surfaces solid.
         // Elsewhere, fade theme surfaces for per-pixel glass.
         #[cfg(not(windows))]
         {
@@ -288,7 +288,7 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
     }
 }
 
-/// Game-launcher surfaces: ink-teal dark and ice-teal light — not DL slate.
+/// Game-launcher surfaces: ink-teal dark and ice-teal light, not DL slate.
 fn apply_launcher_surfaces(theme: &mut Theme) {
     if theme.is_dark() {
         theme.background = hsla(0.54, 0.38, 0.055, 1.0);
@@ -384,7 +384,7 @@ pub fn noise_cache_key(intensity: u8) -> u8 {
 /// Film-grain strength baked into the texture (0.0–1.0).
 ///
 /// Canvas `.opacity()` is a no-op in GPUI's `Style::paint`, so intensity must
-/// live in per-pixel alpha — not element opacity.
+/// live in per-pixel alpha, not element opacity.
 ///
 /// Slider **100%** matches the former **~25%** strength (anything above that
 /// was too heavy).
@@ -441,7 +441,7 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
         }
     }
 
-    // Very light cross soften — keeps density, softens pure 1px sparkles.
+    // Very light cross soften: keeps density, softens pure 1px sparkles.
     let mut soft = vec![0.0f32; field.len()];
     for y in 0..size as i32 {
         for x in 0..size as i32 {
@@ -458,7 +458,7 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
         }
     }
 
-    // Peak fleck alpha at full strength — enough grit, not a fog.
+    // Peak fleck alpha at full strength: enough grit, not a fog.
     let max_a = 28.0 + strength * 72.0; // ~28 at tiny, ~100 at full
 
     let mut img = RgbaImage::new(size, size);
@@ -500,7 +500,7 @@ mod tests {
         assert_eq!(s.accent_preset, AccentPreset::Cyan);
         assert_ne!(s.accent_preset, AccentPreset::Orange);
         let c = resolve_accent_color(&s, true).expect("Cyan preset resolves");
-        // Cyan / teal band — not RusticDL orange (~28°).
+        // Cyan / teal band, not RusticDL orange (~28°).
         assert!(
             c.h > 0.45 && c.h < 0.62,
             "expected cinematic cyan/teal hue, got h={}",

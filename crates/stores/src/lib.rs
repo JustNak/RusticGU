@@ -10,7 +10,7 @@
 //!    `product_install_root`; `update-status.json` is patch state)
 //! 6. Battle.net Agent `product_installs[]` (skip `agent` / `bna`)
 //! 7. itch butlerd `Fetch.Caves` only (never `butler.db`)
-//! 8. GDK / XboxGames — **opt-in only**
+//! 8. GDK / XboxGames: **opt-in only**
 //!
 //! Hard safety:
 //! - never volume-walk (`D:\`)
