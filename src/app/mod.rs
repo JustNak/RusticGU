@@ -374,6 +374,7 @@ impl LibraryApp {
         } else {
             self.settings_return_filter
         };
+        self.drop_missing_store_filter();
         cx.notify();
     }
 
@@ -454,11 +455,9 @@ impl LibraryApp {
     }
 
     fn drop_missing_store_filter(&mut self) {
-        if let FilterKind::Store(store) = self.filter {
-            if !self.games.iter().any(|game| game.store == store) {
-                self.filter = FilterKind::Library;
-            }
-        }
+        self.filter = filter::fallback_missing_store(self.filter, &self.games);
+        self.settings_return_filter =
+            filter::fallback_missing_store(self.settings_return_filter, &self.games);
     }
 
     pub(crate) fn visible_games(&self, cx: &App) -> Vec<LibraryTitle> {

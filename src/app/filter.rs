@@ -74,6 +74,16 @@ pub fn store_nav_entries(games: &[LibraryTitle]) -> Vec<(LibraryStore, i32)> {
         .collect()
 }
 
+/// Fall back to Library when `kind` is a store with no titles in `games`.
+pub(crate) fn fallback_missing_store(kind: FilterKind, games: &[LibraryTitle]) -> FilterKind {
+    match kind {
+        FilterKind::Store(store) if !games.iter().any(|game| game.store == store) => {
+            FilterKind::Library
+        }
+        _ => kind,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +139,37 @@ mod tests {
             FilterKind::Store(LibraryStore::Steam).nav_icon_path(),
             Some("icons/store-steam.svg")
         );
+    }
+
+    #[test]
+    fn missing_store_filter_falls_back_to_library() {
+        let games = vec![title(LibraryStore::Steam, "Hades")];
+        let xbox = FilterKind::Store(LibraryStore::Extra(StoreId::XboxGames));
+        assert_eq!(
+            fallback_missing_store(FilterKind::Store(LibraryStore::Steam), &games),
+            FilterKind::Store(LibraryStore::Steam)
+        );
+        assert_eq!(fallback_missing_store(xbox, &games), FilterKind::Library);
+        assert_eq!(fallback_missing_store(xbox, &[]), FilterKind::Library);
+        assert_eq!(
+            fallback_missing_store(FilterKind::Compacted, &[]),
+            FilterKind::Compacted
+        );
+        assert_eq!(
+            fallback_missing_store(FilterKind::Settings, &[]),
+            FilterKind::Settings
+        );
+    }
+
+    #[test]
+    fn settings_back_stack_does_not_restore_vanished_store() {
+        let games = vec![title(LibraryStore::Steam, "Hades")];
+        let filter = fallback_missing_store(FilterKind::Settings, &games);
+        let settings_return = fallback_missing_store(
+            FilterKind::Store(LibraryStore::Extra(StoreId::XboxGames)),
+            &games,
+        );
+        assert_eq!(filter, FilterKind::Settings);
+        assert_eq!(settings_return, FilterKind::Library);
     }
 }
