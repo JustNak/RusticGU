@@ -67,6 +67,7 @@ impl LibraryApp {
                                     .child(match filter {
                                         FilterKind::Compacted => "Compacted",
                                         FilterKind::Uncompacted => "Uncompacted",
+                                        FilterKind::Store(store) => store.badge(),
                                         _ => "Library",
                                     }),
                             ),
@@ -162,7 +163,7 @@ impl LibraryApp {
     fn render_empty_library(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let query = self.search_input.read(cx).value();
-        let filtered = !query.trim().is_empty() || self.filter != FilterKind::Library;
+        let filtered = !query.trim().is_empty() || !self.filter.shows_all_library();
         let logo = if theme.is_dark() {
             APP_LOGO_DARK
         } else {
@@ -561,7 +562,7 @@ fn render_poster_job_overlay(
         .justify_end()
         .p_2()
         .gap_1p5()
-        .bg(hsla(0.54, 0.30, 0.04, 0.72))
+        .bg(hsla(0.62, 0.04, 0.04, 0.72))
         .child(
             div()
                 .text_xs()
@@ -609,7 +610,7 @@ fn render_poster_veil(
         .justify_end()
         .p_2()
         .gap_1p5()
-        .bg(hsla(0.54, 0.30, 0.04, 0.52))
+        .bg(hsla(0.62, 0.04, 0.04, 0.52))
         .invisible()
         .group_hover(group, |s| s.visible())
         .when(spec.show_excluded_hint, |el| {

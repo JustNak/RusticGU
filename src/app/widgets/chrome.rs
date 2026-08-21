@@ -8,7 +8,7 @@ use gpui_component::{tooltip::Tooltip, Icon, IconName, Sizable, StyledExt};
 pub(crate) fn render_vignette_overlay(edge_alpha: f32, is_dark: bool) -> impl IntoElement {
     let a = edge_alpha.clamp(0.0, 0.5);
     let edge = if is_dark {
-        hsla(0.53, 0.45, 0.02, a)
+        hsla(0.62, 0.04, 0.02, a)
     } else {
         hsla(0.53, 0.18, 0.16, a * 0.75)
     };

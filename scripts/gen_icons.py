@@ -1,6 +1,6 @@
 """Generate RusticGU brand icons from a color master.
 
-Keep cyan/gold color. Do not quantize to a 2-tone slate mark.
+Keep the crab-controller cyan/gold/magenta mark. Do not quantize to a 2-tone slate.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MASTER = 1024
 FIELD_DARK = (0x07, 0x16, 0x1C, 255)
 FIELD_LIGHT = (0xEA, 0xF3, 0xF4, 255)
-DEFAULT_SOURCE = ROOT / "assets" / "brand" / "masters" / "icon-master-source.jpg"
+DEFAULT_SOURCE = ROOT / "assets" / "brand" / "masters" / "icon-master-source.png"
 DEFAULT_DARK = ROOT / "assets" / "brand" / "logo.png"
 DEFAULT_MASTER = ROOT / "assets" / "brand" / "masters" / "icon-master-1024.png"
 PNG_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256, 512]

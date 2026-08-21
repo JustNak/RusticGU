@@ -288,29 +288,34 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
     }
 }
 
-/// Game-launcher surfaces: ink-teal dark and ice-teal light, not DL slate.
+/// Near-neutral charcoal. Keep saturation tiny so the window is dark, not tinted blue.
+fn dark_charcoal(lightness: f32) -> Hsla {
+    hsla(0.62, 0.04, lightness, 1.0)
+}
+
+/// Game-launcher surfaces: charcoal dark and ice-teal light.
 fn apply_launcher_surfaces(theme: &mut Theme) {
     if theme.is_dark() {
-        theme.background = hsla(0.54, 0.38, 0.055, 1.0);
-        theme.title_bar = hsla(0.54, 0.32, 0.072, 1.0);
-        theme.title_bar_border = hsla(0.51, 0.42, 0.18, 1.0);
-        theme.sidebar = hsla(0.54, 0.34, 0.066, 1.0);
-        theme.sidebar_border = hsla(0.52, 0.28, 0.14, 1.0);
-        theme.muted = hsla(0.54, 0.20, 0.14, 1.0);
-        theme.muted_foreground = hsla(0.52, 0.14, 0.70, 1.0);
-        theme.secondary = hsla(0.54, 0.26, 0.12, 1.0);
-        theme.list = hsla(0.54, 0.28, 0.075, 1.0);
-        theme.list_even = hsla(0.54, 0.24, 0.082, 1.0);
-        theme.popover = hsla(0.54, 0.26, 0.10, 1.0);
-        theme.group_box = hsla(0.54, 0.24, 0.09, 1.0);
-        theme.border = hsla(0.52, 0.22, 0.20, 1.0);
-        theme.tab_bar = hsla(0.54, 0.30, 0.07, 1.0);
-        theme.tab = hsla(0.54, 0.26, 0.08, 1.0);
-        theme.table = hsla(0.54, 0.28, 0.075, 1.0);
-        theme.table_even = hsla(0.54, 0.24, 0.082, 1.0);
-        theme.input = hsla(0.52, 0.18, 0.16, 1.0);
-        theme.accordion = hsla(0.54, 0.26, 0.08, 1.0);
-        theme.tiles = hsla(0.54, 0.30, 0.06, 1.0);
+        theme.background = dark_charcoal(0.07);
+        theme.title_bar = dark_charcoal(0.085);
+        theme.title_bar_border = dark_charcoal(0.16);
+        theme.sidebar = dark_charcoal(0.078);
+        theme.sidebar_border = dark_charcoal(0.14);
+        theme.muted = dark_charcoal(0.14);
+        theme.muted_foreground = dark_charcoal(0.68);
+        theme.secondary = dark_charcoal(0.12);
+        theme.list = dark_charcoal(0.08);
+        theme.list_even = dark_charcoal(0.088);
+        theme.popover = dark_charcoal(0.10);
+        theme.group_box = dark_charcoal(0.09);
+        theme.border = dark_charcoal(0.18);
+        theme.tab_bar = dark_charcoal(0.075);
+        theme.tab = dark_charcoal(0.085);
+        theme.table = dark_charcoal(0.08);
+        theme.table_even = dark_charcoal(0.088);
+        theme.input = dark_charcoal(0.14);
+        theme.accordion = dark_charcoal(0.085);
+        theme.tiles = dark_charcoal(0.07);
         theme.success = hsla(0.45, 0.55, 0.48, 1.0);
         theme.info = hsla(0.51, 0.62, 0.52, 1.0);
         return;
@@ -493,6 +498,17 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dark_window_is_charcoal_not_tinted_blue() {
+        let bg = dark_charcoal(0.07);
+        assert!(
+            bg.s < 0.08,
+            "dark surfaces must stay near-neutral, s={}",
+            bg.s
+        );
+        assert!(bg.l < 0.12, "dark surfaces must stay dark, l={}", bg.l);
+    }
 
     #[test]
     fn default_accent_is_cinematic_cyan() {

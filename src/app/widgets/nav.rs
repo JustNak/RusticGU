@@ -23,6 +23,26 @@ pub(crate) fn nav_item(
     active: bool,
     cx: &mut Context<LibraryApp>,
 ) -> impl IntoElement {
+    nav_row(label, filter, count, active, false, cx)
+}
+
+pub(crate) fn store_nav_item(
+    filter: FilterKind,
+    count: i32,
+    active: bool,
+    cx: &mut Context<LibraryApp>,
+) -> impl IntoElement {
+    nav_row(filter.label(), filter, count, active, true, cx)
+}
+
+fn nav_row(
+    label: &'static str,
+    filter: FilterKind,
+    count: i32,
+    active: bool,
+    nested: bool,
+    cx: &mut Context<LibraryApp>,
+) -> impl IntoElement {
     let theme = cx.theme().clone();
     let bg = if active {
         theme.list_active
@@ -44,12 +64,18 @@ pub(crate) fn nav_item(
     } else {
         theme.muted_foreground
     };
+    let row_id = if nested {
+        SharedString::from(format!("nav-store-{label}"))
+    } else {
+        SharedString::from(format!("nav-{label}"))
+    };
 
     h_flex()
-        .id(SharedString::from(format!("nav-{label}")))
+        .id(row_id)
         .relative()
-        .h(px(38.))
+        .h(px(if nested { 32. } else { 38. }))
         .px_2()
+        .pl(px(if nested { 22. } else { 8. }))
         .gap_2()
         .items_center()
         .rounded(theme.radius)
@@ -65,7 +91,7 @@ pub(crate) fn nav_item(
         .on_click(cx.listener(move |this, _, window, cx| {
             this.select_filter(filter, window, cx);
         }))
-        .when(active, |el| {
+        .when(active && !nested, |el| {
             el.child(
                 div()
                     .absolute()
@@ -77,13 +103,25 @@ pub(crate) fn nav_item(
                     .bg(theme.primary),
             )
         })
+        .when(active && nested, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .left(px(10.))
+                    .top(px(8.))
+                    .bottom(px(8.))
+                    .w(px(2.))
+                    .rounded_full()
+                    .bg(theme.primary),
+            )
+        })
         .child(match filter.nav_icon_path() {
             Some(path) => Icon::empty()
                 .path(path)
-                .with_size(px(16.))
+                .with_size(px(if nested { 14. } else { 16. }))
                 .text_color(icon_color),
             None => Icon::new(filter.nav_icon())
-                .with_size(px(16.))
+                .with_size(px(if nested { 14. } else { 16. }))
                 .text_color(icon_color),
         })
         .child(
@@ -101,14 +139,6 @@ pub(crate) fn nav_item(
         .when(count >= 0, |el| {
             el.child(
                 div()
-                    .px_1p5()
-                    .py_0p5()
-                    .rounded_full()
-                    .bg(if active {
-                        theme.primary.opacity(0.18)
-                    } else {
-                        theme.muted.opacity(0.45)
-                    })
                     .text_xs()
                     .font_medium()
                     .text_color(count_color)

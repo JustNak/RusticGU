@@ -54,6 +54,10 @@ pub const APP_LOGO_DARK: &str = "brand/logo.png";
 /// Light-theme title-bar / chrome mark (dark glyph on light field).
 pub const APP_LOGO_LIGHT: &str = "brand/logo-light.png";
 
+/// Vector brand mark (crab fused with a gamepad).
+#[allow(dead_code)]
+pub const APP_LOGO_SVG: &str = "brand/logo.svg";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -75,5 +79,14 @@ mod tests {
             .to_ascii_lowercase()
             .contains("download manager"));
         assert!(!APP_VERSION.is_empty());
+        assert_eq!(APP_LOGO_SVG, "brand/logo.svg");
+        let svg = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("assets")
+            .join(APP_LOGO_SVG);
+        let text = std::fs::read_to_string(&svg).expect("brand svg");
+        assert!(text.contains("<svg"), "logo.svg should be an svg");
+        assert!(text.contains("#3298a3"), "logo.svg should keep teal");
+        assert!(text.contains("#dc953a"), "logo.svg should keep gold");
+        assert!(text.contains("#c2206d"), "logo.svg should keep magenta");
     }
 }

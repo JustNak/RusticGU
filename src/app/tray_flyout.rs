@@ -32,19 +32,19 @@ use crate::window_placement::{
 
 /// Always-dark panel tokens (Proton-style). Never inherit the main title bar.
 fn panel_bg() -> gpui::Hsla {
-    hsla(0.54, 0.32, 0.07, 1.0)
+    hsla(0.62, 0.04, 0.08, 1.0)
 }
 fn panel_border() -> gpui::Hsla {
-    hsla(0.51, 0.40, 0.22, 1.0)
+    hsla(0.62, 0.05, 0.18, 1.0)
 }
 fn panel_fg() -> gpui::Hsla {
-    hsla(0.52, 0.08, 0.94, 1.0)
+    hsla(0.62, 0.03, 0.94, 1.0)
 }
 fn panel_muted() -> gpui::Hsla {
-    hsla(0.52, 0.12, 0.64, 1.0)
+    hsla(0.62, 0.04, 0.64, 1.0)
 }
 fn panel_row() -> gpui::Hsla {
-    hsla(0.54, 0.26, 0.11, 1.0)
+    hsla(0.62, 0.05, 0.12, 1.0)
 }
 fn panel_live() -> gpui::Hsla {
     hsla(0.50, 0.70, 0.55, 1.0)
