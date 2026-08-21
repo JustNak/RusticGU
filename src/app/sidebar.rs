@@ -8,8 +8,8 @@ use gpui_component::{
     divider::Divider, h_flex, v_flex, ActiveTheme, Icon, IconName, Sizable, StyledExt,
 };
 
-use super::filter::FilterKind;
-use super::widgets::{nav_item, settings_nav_item};
+use super::filter::{store_nav_entries, FilterKind};
+use super::widgets::{nav_item, settings_nav_item, store_nav_item};
 use super::LibraryApp;
 
 impl LibraryApp {
@@ -18,6 +18,7 @@ impl LibraryApp {
         let filter = self.filter;
         let sidebar_w = self.settings.ui_density.sidebar_w();
         let (all, compacted, uncompacted) = self.library_counts();
+        let stores = store_nav_entries(&self.games);
 
         v_flex()
             .w(px(sidebar_w))
@@ -34,7 +35,7 @@ impl LibraryApp {
                     .pb_1()
                     .text_xs()
                     .font_semibold()
-                    .text_color(theme.primary.opacity(0.85))
+                    .text_color(theme.muted_foreground)
                     .child("LIBRARY"),
             )
             .child(nav_item(
@@ -44,6 +45,10 @@ impl LibraryApp {
                 filter == FilterKind::Library,
                 cx,
             ))
+            .children(stores.into_iter().map(|(store, count)| {
+                let kind = FilterKind::Store(store);
+                store_nav_item(kind, count, filter == kind, cx)
+            }))
             .child(nav_item(
                 FilterKind::Compacted.label(),
                 FilterKind::Compacted,

@@ -333,12 +333,14 @@ impl LibraryApp {
                         app.live.sync_titles(&app.games);
                         app.live
                             .set_allow_dstorage(app.settings.allow_dstorage_override);
+                        app.drop_missing_store_filter();
                         app.hydrate_covers_from_disk();
                         app.request_covers(cx);
                     }
                     Err(msg) => {
                         app.games.clear();
                         app.library_error = Some(msg);
+                        app.drop_missing_store_filter();
                     }
                 }
                 app.flush_state_now();
@@ -451,6 +453,14 @@ impl LibraryApp {
         (all, compacted, all - compacted)
     }
 
+    fn drop_missing_store_filter(&mut self) {
+        if let FilterKind::Store(store) = self.filter {
+            if !self.games.iter().any(|game| game.store == store) {
+                self.filter = FilterKind::Library;
+            }
+        }
+    }
+
     pub(crate) fn visible_games(&self, cx: &App) -> Vec<LibraryTitle> {
         let query = self
             .search_input
@@ -462,6 +472,7 @@ impl LibraryApp {
             .iter()
             .filter(|game| match self.filter {
                 FilterKind::Library | FilterKind::Settings => true,
+                FilterKind::Store(store) => game.store == store,
                 FilterKind::Compacted => game.is_compacted(),
                 FilterKind::Uncompacted => !game.is_compacted(),
             })
