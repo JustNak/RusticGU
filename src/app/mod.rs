@@ -5,6 +5,7 @@ mod compact_flow;
 mod confirm_dialogs;
 mod cover_flow;
 mod filter;
+mod inspector;
 mod library_view;
 mod settings_actions;
 mod settings_category;
@@ -43,7 +44,7 @@ use crate::compact::{
 };
 use crate::library::{
     algorithm_from_policy, scan_library, shelf_policy_for, steam_title_id,
-    title_is_compact_excluded, LibraryTitle,
+    title_is_compact_excluded, LibraryTitle, ScanOptions,
 };
 use crate::live::LiveHandle;
 use crate::persistence::{
@@ -107,6 +108,7 @@ pub struct LibraryApp {
     pub(crate) flyout_window: Option<AnyWindowHandle>,
     pub(crate) activate: ActivateBridge,
     pub(crate) live: LiveHandle,
+    pub(crate) last_patching: HashSet<String>,
 }
 
 impl LibraryApp {
@@ -220,6 +222,7 @@ impl LibraryApp {
             flyout_window: None,
             activate,
             live: LiveHandle::start(),
+            last_patching: HashSet::new(),
         };
         if let Some(id) = app.selected_id.clone() {
             app.selected_ids.insert(id);
@@ -304,12 +307,15 @@ impl LibraryApp {
         self.library_error = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let include_xbox = this
-                .update(cx, |app, _| app.settings.include_xbox_games)
-                .unwrap_or(false);
+            let options = this
+                .update(cx, |app, _| ScanOptions {
+                    include_xbox_games: app.settings.include_xbox_games,
+                    custom_directories: app.settings.custom_game_directories.clone(),
+                })
+                .unwrap_or_default();
             let result = cx
                 .background_executor()
-                .spawn(async move { scan_library(include_xbox) })
+                .spawn(async move { scan_library(options) })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.library_scanning = false;
@@ -553,6 +559,22 @@ impl LibraryApp {
         let _ = save_state(&self.paths, &state);
     }
 
+    fn sync_patching_titles(&mut self, cx: &mut Context<Self>) {
+        let next: HashSet<String> = self
+            .games
+            .iter()
+            .filter(|game| {
+                game.steam_app_id()
+                    .is_some_and(|id| self.live.is_locked(&id.to_string()))
+            })
+            .map(|game| game.id.clone())
+            .collect();
+        if next != self.last_patching {
+            self.last_patching = next;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn toggle_live_compact(&mut self, cx: &mut Context<Self>) {
         let paused = self.live.toggle_paused();
         self.show_toast(
@@ -781,6 +803,7 @@ impl Render for LibraryApp {
         self.poll_hidden_window_actions(cx);
         self.apply_pending_tray_actions(window, cx);
         self.apply_pending_whats_new(window, cx);
+        self.sync_patching_titles(cx);
         self.capture_window_layout(window);
         self.flush_toast(cx);
 

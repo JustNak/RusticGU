@@ -1,5 +1,7 @@
 //! Settings disk helpers and live-draft setters.
 
+use std::path::PathBuf;
+
 use gpui::{Context, ParentElement, Window};
 use gpui_component::WindowExt;
 
@@ -7,6 +9,7 @@ use super::LibraryApp;
 use crate::appearance::{apply_appearance, apply_window_opacity};
 use crate::persistence::save_settings;
 use crate::settings::{
+    custom_directory_key, custom_directory_reject_reason, normalize_custom_game_directory,
     AccentPreset, AppTheme, CornerRadiusScale, OsNotifyMode, ProgressStyle, Settings, UiDensity,
     UpdateChannel,
 };
@@ -199,6 +202,91 @@ impl LibraryApp {
         cx.notify();
     }
 
+    pub(crate) fn prompt_add_custom_game_directory(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        super::widgets::prompt_custom_game_directory(cx.entity(), window, cx);
+    }
+
+    pub(crate) fn add_custom_game_directory(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = normalize_custom_game_directory(&path) else {
+            self.show_error_toast("Choose a game folder.", cx);
+            return;
+        };
+        if let Some(reason) = custom_directory_reject_reason(&path) {
+            self.show_error_toast(reason, cx);
+            return;
+        }
+        if !path.is_dir() {
+            self.show_error_toast("That folder does not exist.", cx);
+            return;
+        }
+        let key = custom_directory_key(&path);
+        if self
+            .settings
+            .custom_game_directories
+            .iter()
+            .any(|p| custom_directory_key(p) == key)
+        {
+            self.show_toast("That folder is already in Custom games.", cx);
+            return;
+        }
+        if self
+            .games
+            .iter()
+            .any(|g| custom_directory_key(&g.install_path) == key)
+        {
+            self.show_toast("That folder is already in your library.", cx);
+            return;
+        }
+        self.settings.custom_game_directories.push(path);
+        if !self.persist_settings_quietly(window, cx) {
+            return;
+        }
+        self.show_toast("Custom game folder added.", cx);
+        self.refresh_library(cx);
+        cx.notify();
+    }
+
+    pub(crate) fn remove_custom_game_directory(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let key = custom_directory_key(&path);
+        let before = self.settings.custom_game_directories.len();
+        self.settings
+            .custom_game_directories
+            .retain(|p| custom_directory_key(p) != key);
+        if self.settings.custom_game_directories.len() == before {
+            return;
+        }
+        if !self.persist_settings_quietly(window, cx) {
+            return;
+        }
+        self.show_toast("Custom game folder removed.", cx);
+        self.refresh_library(cx);
+        cx.notify();
+    }
+
+    fn persist_settings_quietly(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.settings.sanitize_appearance();
+        if let Err(msg) = save_settings(&self.paths, &self.settings) {
+            self.show_error_toast(msg, cx);
+            return false;
+        }
+        apply_appearance(&self.settings, Some(window), cx);
+        true
+    }
+
     pub(crate) fn set_update_channel(
         &mut self,
         channel: UpdateChannel,
@@ -237,6 +325,7 @@ impl LibraryApp {
                         app.sync_appearance_sliders(window, cx);
                         app.preview_appearance(window, cx);
                         app.sync_tray_lifetime(cx);
+                        app.refresh_library(cx);
                         app.show_toast("Defaults restored (Save to persist).", cx);
                     });
                     true

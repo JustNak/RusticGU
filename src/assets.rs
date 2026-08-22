@@ -144,6 +144,8 @@ mod tests {
             "icons/store-battlenet.svg",
             "icons/store-itch.svg",
             "icons/store-xbox.svg",
+            "icons/folder.svg",
+            "icons/delete.svg",
         ] {
             let bytes = Assets::load_embedded(path)
                 .unwrap_or_else(|| panic!("missing embedded asset: {path}"));

@@ -26,8 +26,8 @@ pub use policy::{
 };
 #[allow(unused_imports)]
 pub use scan::{
-    discover_extra_titles, extra_store_options, extra_store_roots, merge_library, scan_library,
-    typical_xbox_games_roots,
+    append_custom_titles, discover_extra_titles, extra_store_options, extra_store_roots,
+    merge_library, scan_library, typical_xbox_games_roots, ScanOptions,
 };
 #[allow(unused_imports)]
-pub use title::{extra_title_id, steam_title_id, LibraryStore, LibraryTitle};
+pub use title::{custom_title_id, extra_title_id, steam_title_id, LibraryStore, LibraryTitle};

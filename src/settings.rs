@@ -1,4 +1,8 @@
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
+use stores::util::{looks_like_volume_root, path_contains_component};
 
 /// Default first-run window size (logical px).
 pub const DEFAULT_WINDOW_WIDTH: f32 = 1120.0;
@@ -397,6 +401,9 @@ pub struct Settings {
     /// GDK / XboxGames discovery is opt-in. Never WindowsApps.
     #[serde(default)]
     pub include_xbox_games: bool,
+    /// User-picked install folders that launchers do not list. Each path is one title.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_game_directories: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -426,8 +433,38 @@ impl Default for Settings {
             compact_algorithm: CompactAlgorithm::Xpress8k,
             allow_dstorage_override: false,
             include_xbox_games: false,
+            custom_game_directories: Vec::new(),
         }
     }
+}
+
+/// Case-insensitive path key used to dedupe custom folders.
+pub fn custom_directory_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+/// Trim and strip trailing separators. `None` if the path is empty.
+pub fn normalize_custom_game_directory(path: &Path) -> Option<PathBuf> {
+    let raw = path.to_string_lossy();
+    let trimmed = raw.trim().trim_end_matches(['\\', '/']);
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+/// Why this path cannot be a custom game folder. `None` means it is allowed.
+pub fn custom_directory_reject_reason(path: &Path) -> Option<String> {
+    if looks_like_volume_root(path) {
+        return Some("Pick a game folder, not a drive root.".into());
+    }
+    if path_contains_component(path, "WindowsApps") {
+        return Some("WindowsApps folders cannot be compacted.".into());
+    }
+    None
 }
 
 impl Settings {
@@ -440,6 +477,25 @@ impl Settings {
         self.accent_lightness = self.accent_lightness.clamp(0.0, 100.0);
         self.window_layout.sanitize();
         self.compact_algorithm = self.compact_algorithm.for_live_library();
+        self.sanitize_custom_game_directories();
+    }
+
+    pub fn sanitize_custom_game_directories(&mut self) {
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        for raw in std::mem::take(&mut self.custom_game_directories) {
+            let Some(path) = normalize_custom_game_directory(&raw) else {
+                continue;
+            };
+            if custom_directory_reject_reason(&path).is_some() {
+                continue;
+            }
+            if !seen.insert(custom_directory_key(&path)) {
+                continue;
+            }
+            out.push(path);
+        }
+        self.custom_game_directories = out;
     }
 
     pub fn reset_appearance(&mut self) {
@@ -470,6 +526,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn settings_round_trip_camel_case() {
@@ -482,6 +539,7 @@ mod tests {
         assert!(json.contains("\"allowDstorageOverride\""));
         assert!(json.contains("\"osNotifyMode\""));
         assert!(json.contains("\"includeXboxGames\""));
+        assert!(!json.contains("\"customGameDirectories\""));
         assert!(!json.contains("\"update_channel\""));
         let loaded: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded, settings);
@@ -540,6 +598,41 @@ mod tests {
         assert!(s.close_to_tray);
         assert!(!s.allow_dstorage_override);
         assert!(!s.include_xbox_games);
+        assert!(s.custom_game_directories.is_empty());
+    }
+
+    #[test]
+    fn custom_directories_round_trip_and_sanitize() {
+        let mut s = Settings::default();
+        s.custom_game_directories = vec![
+            PathBuf::from(r"D:\Games\Hades"),
+            PathBuf::from(r"d:/games/hades\"),
+            PathBuf::from(r"D:\"),
+            PathBuf::from(r"C:\Program Files\WindowsApps\Foo"),
+            PathBuf::from("   "),
+            PathBuf::from(r"E:\Portable\Celeste"),
+        ];
+        s.sanitize_appearance();
+        assert_eq!(
+            s.custom_game_directories,
+            vec![
+                PathBuf::from(r"D:\Games\Hades"),
+                PathBuf::from(r"E:\Portable\Celeste"),
+            ]
+        );
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"customGameDirectories\""));
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.custom_game_directories, s.custom_game_directories);
+        assert_eq!(
+            custom_directory_reject_reason(Path::new(r"D:\")),
+            Some("Pick a game folder, not a drive root.".into())
+        );
+        assert_eq!(
+            custom_directory_reject_reason(Path::new(r"C:\Program Files\WindowsApps\Game")),
+            Some("WindowsApps folders cannot be compacted.".into())
+        );
+        assert!(custom_directory_reject_reason(Path::new(r"D:\Games\Hades")).is_none());
     }
 
     #[test]

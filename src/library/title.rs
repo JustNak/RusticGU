@@ -32,6 +32,8 @@ pub struct LibraryTitle {
 pub enum LibraryStore {
     Steam,
     Extra(StoreId),
+    /// User-picked folder. Not a launcher index.
+    Custom,
 }
 
 impl LibraryStore {
@@ -39,6 +41,7 @@ impl LibraryStore {
         match self {
             Self::Steam => "steam",
             Self::Extra(id) => id.as_str(),
+            Self::Custom => "custom",
         }
     }
 
@@ -53,10 +56,11 @@ impl LibraryStore {
             Self::Extra(StoreId::Battlenet) => "Battle.net",
             Self::Extra(StoreId::Itch) => "itch",
             Self::Extra(StoreId::XboxGames) => "Xbox",
+            Self::Custom => "Custom",
         }
     }
 
-    /// Poster glyph for this launcher (`assets/icons/store-*.svg`, Simple Icons CC0).
+    /// Poster glyph for this launcher (`assets/icons/store-*.svg`, or `folder.svg` for Custom).
     ///
     /// `None` means the title has no launcher to identify — omit the badge.
     pub fn icon_path(self) -> Option<&'static str> {
@@ -70,11 +74,29 @@ impl LibraryStore {
             Self::Extra(StoreId::Battlenet) => "icons/store-battlenet.svg",
             Self::Extra(StoreId::Itch) => "icons/store-itch.svg",
             Self::Extra(StoreId::XboxGames) => "icons/store-xbox.svg",
+            Self::Custom => "icons/folder.svg",
         })
     }
 
     pub fn is_steam(self) -> bool {
         matches!(self, Self::Steam)
+    }
+
+    /// Steam can launch via protocol. Other stores open the install folder.
+    pub fn launch_label(self) -> &'static str {
+        if self.is_steam() {
+            "Play"
+        } else {
+            "Open folder"
+        }
+    }
+
+    pub fn launch_icon_path(self) -> &'static str {
+        if self.is_steam() {
+            "icons/play.svg"
+        } else {
+            "icons/folder-open.svg"
+        }
     }
 }
 
@@ -86,6 +108,10 @@ impl std::fmt::Display for LibraryStore {
 
 pub fn steam_title_id(app_id: u32) -> String {
     format!("steam:{app_id}")
+}
+
+pub fn custom_title_id(path: &Path) -> String {
+    format!("custom:{}", normalize_path_key(path))
 }
 
 pub fn extra_title_id(title: &DiscoveredTitle) -> String {
@@ -148,6 +174,33 @@ impl LibraryTitle {
         }
     }
 
+    /// One user-picked install folder. `None` if the path is missing or not a directory.
+    pub fn from_custom_directory(path: PathBuf) -> Option<Self> {
+        if !path.is_dir() {
+            return None;
+        }
+        let name = path.file_name()?.to_string_lossy().trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let (logical, on_disk) = cheap_install_sizes(&path);
+        Some(Self {
+            id: custom_title_id(&path),
+            name,
+            install_path: path,
+            store: LibraryStore::Custom,
+            launcher_id: None,
+            last_played_unix: None,
+            logical_bytes: logical,
+            on_disk_bytes: on_disk,
+            compacted: sizes_indicate_compacted(on_disk, logical),
+            steam_app_id: None,
+            steam_library_path: None,
+            steam_install_dir_name: None,
+            cover_url: None,
+        })
+    }
+
     pub fn steam_app_id(&self) -> Option<u32> {
         self.steam_app_id
     }
@@ -155,13 +208,20 @@ impl LibraryTitle {
     pub fn is_compacted(&self) -> bool {
         self.compacted
     }
+
+    pub fn saved_bytes(&self) -> Option<u64> {
+        let logical = self.logical_bytes?;
+        let disk = self.on_disk_bytes?;
+        (disk < logical).then_some(logical - disk)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::library::steam::sizes_indicate_compacted;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use stores::StoreId;
 
     fn title(compacted: bool, logical: Option<u64>, on_disk: Option<u64>) -> LibraryTitle {
         LibraryTitle {
@@ -213,6 +273,7 @@ mod tests {
             LibraryStore::Extra(StoreId::Battlenet),
             LibraryStore::Extra(StoreId::Itch),
             LibraryStore::Extra(StoreId::XboxGames),
+            LibraryStore::Custom,
         ] {
             let rel = store
                 .icon_path()
@@ -226,5 +287,47 @@ mod tests {
                 "{rel} should tint via currentColor"
             );
         }
+    }
+
+    #[test]
+    fn custom_title_id_is_stable_across_slash_styles() {
+        assert_eq!(
+            custom_title_id(Path::new(r"D:\Games\Hades")),
+            custom_title_id(Path::new(r"D:/Games/Hades/"))
+        );
+        assert_eq!(
+            custom_title_id(Path::new(r"D:\Games\Hades")),
+            "custom:d:\\games\\hades"
+        );
+        assert_eq!(LibraryStore::Custom.badge(), "Custom");
+        assert_eq!(LibraryStore::Custom.as_str(), "custom");
+        assert_eq!(LibraryStore::Custom.icon_path(), Some("icons/folder.svg"));
+    }
+
+    #[test]
+    fn steam_launch_plays_other_stores_open_the_folder() {
+        assert_eq!(LibraryStore::Steam.launch_label(), "Play");
+        assert_eq!(LibraryStore::Custom.launch_label(), "Open folder");
+        assert_eq!(
+            LibraryStore::Extra(StoreId::Epic).launch_label(),
+            "Open folder"
+        );
+        assert_eq!(LibraryStore::Steam.launch_icon_path(), "icons/play.svg");
+        assert_eq!(
+            LibraryStore::Custom.launch_icon_path(),
+            "icons/folder-open.svg"
+        );
+        assert_eq!(
+            LibraryStore::Extra(StoreId::Epic).launch_icon_path(),
+            "icons/folder-open.svg"
+        );
+    }
+
+    #[test]
+    fn saved_bytes_only_when_disk_is_below_logical() {
+        assert_eq!(title(true, Some(100), Some(40)).saved_bytes(), Some(60));
+        assert_eq!(title(false, Some(100), Some(100)).saved_bytes(), None);
+        assert_eq!(title(false, Some(100), None).saved_bytes(), None);
+        assert_eq!(title(false, None, Some(40)).saved_bytes(), None);
     }
 }
