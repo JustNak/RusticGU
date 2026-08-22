@@ -133,6 +133,20 @@ impl LiveHandle {
         )
         .map(|done| done.message)
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        Self {
+            inner: Arc::new(LiveInner::new()),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn lock_title(&self, title_id: &str) {
+        if let Ok(mut locked) = self.inner.locked.lock() {
+            locked.insert(title_id.to_string());
+        }
+    }
 }
 
 fn run_watch_loop(inner: Arc<LiveInner>) {

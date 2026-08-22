@@ -16,7 +16,7 @@ pub enum FilterKind {
 }
 
 /// Sidebar tree order. A launcher is listed only when the library has titles from it.
-pub const STORE_NAV_ORDER: [LibraryStore; 9] = [
+pub const STORE_NAV_ORDER: [LibraryStore; 10] = [
     LibraryStore::Steam,
     LibraryStore::Extra(StoreId::Epic),
     LibraryStore::Extra(StoreId::Gog),
@@ -26,6 +26,7 @@ pub const STORE_NAV_ORDER: [LibraryStore; 9] = [
     LibraryStore::Extra(StoreId::Battlenet),
     LibraryStore::Extra(StoreId::Itch),
     LibraryStore::Extra(StoreId::XboxGames),
+    LibraryStore::Custom,
 ];
 
 impl FilterKind {
@@ -113,6 +114,7 @@ mod tests {
             title(LibraryStore::Steam, "Hades"),
             title(LibraryStore::Steam, "Celeste"),
             title(LibraryStore::Extra(StoreId::Gog), "Disco Elysium"),
+            title(LibraryStore::Custom, "Portable"),
         ];
         let entries = store_nav_entries(&games);
         assert_eq!(
@@ -120,6 +122,7 @@ mod tests {
             vec![
                 (LibraryStore::Steam, 2),
                 (LibraryStore::Extra(StoreId::Gog), 1),
+                (LibraryStore::Custom, 1),
             ]
         );
     }

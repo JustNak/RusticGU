@@ -552,7 +552,7 @@ pub fn initial_cover_kind(title: &LibraryTitle, resolved: Option<&Path>) -> Cove
                 CoverKind::Monogram
             }
         }
-        LibraryStore::Extra(_) => cover_kind_for(None, resolved),
+        LibraryStore::Extra(_) | LibraryStore::Custom => cover_kind_for(None, resolved),
     }
 }
 

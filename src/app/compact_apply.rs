@@ -10,6 +10,7 @@ use crate::compact::{
     CompactProgress,
 };
 use crate::library::{title_is_compact_excluded, LibraryTitle};
+use crate::live::LiveHandle;
 use crate::notifications::notify_compact;
 
 enum CompactJobMsg {
@@ -67,6 +68,105 @@ impl PosterJob {
 
     pub(crate) fn waiting(&self, id: &str) -> bool {
         self.covers(id) && self.current_id != id
+    }
+}
+
+/// What the poster and inspector should show for one title.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum TitleActivity {
+    Idle,
+    Excluded,
+    Patching,
+    Job {
+        kind: PosterJobKind,
+        waiting: bool,
+        progress: CompactProgress,
+    },
+}
+
+impl TitleActivity {
+    pub(crate) fn resolve(
+        title: &LibraryTitle,
+        job: Option<&PosterJob>,
+        live: &LiveHandle,
+    ) -> Self {
+        if let Some(job) = job.filter(|job| job.covers(&title.id)) {
+            return Self::Job {
+                kind: job.kind,
+                waiting: job.waiting(&title.id),
+                progress: job.progress.clone(),
+            };
+        }
+        if title
+            .steam_app_id()
+            .is_some_and(|id| live.is_locked(&id.to_string()))
+        {
+            return Self::Patching;
+        }
+        if title_is_compact_excluded(title) {
+            return Self::Excluded;
+        }
+        Self::Idle
+    }
+
+    pub(crate) fn heading(&self) -> Option<&'static str> {
+        match self {
+            Self::Idle => None,
+            Self::Excluded => Some("Excluded"),
+            Self::Patching => Some("Patching"),
+            Self::Job { waiting: true, .. } => Some("Waiting…"),
+            Self::Job {
+                kind: PosterJobKind::Decompress,
+                ..
+            } => Some("Restoring"),
+            Self::Job {
+                kind: PosterJobKind::Change,
+                ..
+            } => Some("Changing"),
+            Self::Job {
+                kind: PosterJobKind::Compress,
+                ..
+            } => Some("Compressing"),
+            Self::Job {
+                kind: PosterJobKind::Walkback,
+                ..
+            } => Some("Walking back"),
+        }
+    }
+
+    pub(crate) fn detail(&self) -> Option<String> {
+        match self {
+            Self::Idle => None,
+            Self::Excluded => Some("Excluded from compact".into()),
+            Self::Patching => {
+                Some("Steam is updating this title. Compact waits until the patch finishes.".into())
+            }
+            Self::Job { waiting: true, .. } => Some("Queued behind another title.".into()),
+            Self::Job { progress, .. } => Some(progress.message.clone()),
+        }
+    }
+
+    pub(crate) fn percent(&self) -> Option<f32> {
+        let Self::Job {
+            kind,
+            waiting,
+            progress,
+        } = self
+        else {
+            return None;
+        };
+        if *waiting || progress.total == 0 {
+            return Some(0.0);
+        }
+        let pct = (progress.processed as f32 / progress.total as f32) * 100.0;
+        if matches!(kind, PosterJobKind::Decompress) && progress.processed == 0 {
+            return Some(28.0);
+        }
+        Some(pct.clamp(0.0, 100.0))
+    }
+
+    pub(crate) fn allows_compact(&self) -> bool {
+        matches!(self, Self::Idle)
     }
 }
 
@@ -393,5 +493,84 @@ impl LibraryApp {
         );
         self.refresh_library(cx);
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PosterJob, PosterJobKind, TitleActivity};
+    use crate::compact::CompactProgress;
+    use crate::library::{LibraryStore, LibraryTitle};
+    use crate::live::LiveHandle;
+    use std::path::PathBuf;
+
+    fn steam_title(app_id: u32, name: &str) -> LibraryTitle {
+        LibraryTitle {
+            id: format!("steam:{app_id}"),
+            name: name.into(),
+            install_path: PathBuf::from(r"D:\Steam\steamapps\common").join(name),
+            store: LibraryStore::Steam,
+            launcher_id: Some(app_id.to_string()),
+            last_played_unix: None,
+            logical_bytes: Some(100),
+            on_disk_bytes: Some(40),
+            compacted: true,
+            steam_app_id: Some(app_id),
+            steam_library_path: None,
+            steam_install_dir_name: None,
+            cover_url: None,
+        }
+    }
+
+    #[test]
+    fn decompress_job_beats_patching_and_shows_restoring() {
+        let title = steam_title(1, "Bloons");
+        let live = LiveHandle::for_tests();
+        live.lock_title("1");
+        let job = PosterJob {
+            title_ids: vec![title.id.clone()],
+            current_id: title.id.clone(),
+            kind: PosterJobKind::Decompress,
+            progress: CompactProgress {
+                processed: 0,
+                total: 400,
+                message: "Starting WOF uncompact…".into(),
+            },
+        };
+        let activity = TitleActivity::resolve(&title, Some(&job), &live);
+        assert_eq!(activity.heading(), Some("Restoring"));
+        assert!(activity.percent().unwrap() > 0.0);
+        assert!(!activity.allows_compact());
+    }
+
+    #[test]
+    fn locked_steam_title_is_patching() {
+        let title = steam_title(440, "Bloons");
+        let live = LiveHandle::for_tests();
+        live.lock_title("440");
+        let activity = TitleActivity::resolve(&title, None, &live);
+        assert_eq!(activity, TitleActivity::Patching);
+        assert_eq!(activity.heading(), Some("Patching"));
+        assert!(!activity.allows_compact());
+        assert!(activity.percent().is_none());
+    }
+
+    #[test]
+    fn queued_title_waits() {
+        let title = steam_title(2, "Celeste");
+        let live = LiveHandle::for_tests();
+        let job = PosterJob {
+            title_ids: vec!["steam:1".into(), title.id.clone()],
+            current_id: "steam:1".into(),
+            kind: PosterJobKind::Compress,
+            progress: CompactProgress {
+                processed: 10,
+                total: 20,
+                message: "working".into(),
+            },
+        };
+        let activity = TitleActivity::resolve(&title, Some(&job), &live);
+        assert_eq!(activity.heading(), Some("Waiting…"));
+        assert_eq!(activity.percent(), Some(0.0));
     }
 }

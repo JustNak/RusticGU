@@ -7,11 +7,11 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     clipboard::Clipboard,
     group_box::{GroupBox, GroupBoxVariants},
-    h_flex, v_flex, ActiveTheme, Disableable, IconName, Sizable,
+    h_flex, v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
 use super::super::widgets::{
-    field_hint, settings_choice_row, settings_field_label, settings_subgroup,
+    field_hint, settings_choice_row, settings_field_label, settings_subgroup, shorten_path_display,
 };
 use super::super::LibraryApp;
 use crate::settings::{CompactAlgorithm, UpdateChannel};
@@ -26,6 +26,7 @@ impl LibraryApp {
         let algorithm = self.settings.compact_algorithm;
         let allow_dstorage = self.settings.allow_dstorage_override;
         let include_xbox = self.settings.include_xbox_games;
+        let custom_dirs = self.settings.custom_game_directories.clone();
 
         GroupBox::new().outline().child(
             v_flex()
@@ -142,6 +143,60 @@ impl LibraryApp {
                         ),
                     cx,
                 ))
+                .child(settings_subgroup("Custom games", true, cx))
+                .child(settings_choice_row(
+                    "Game folders",
+                    Some("Folders that launchers do not list. Each folder is one title. Saved immediately."),
+                    Button::new("add-custom-game-dir")
+                        .outline()
+                        .icon(Icon::empty().path("icons/plus.svg"))
+                        .label("Add folder")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.prompt_add_custom_game_directory(window, cx);
+                        })),
+                    cx,
+                ))
+                .children(custom_dirs.into_iter().enumerate().map(|(i, path)| {
+                    let display = path.display().to_string();
+                    let short = shorten_path_display(&display);
+                    let open_path = path.clone();
+                    let remove_path = path.clone();
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .overflow_x_hidden()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child(short),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("open-custom-dir-{i}")))
+                                .outline()
+                                .small()
+                                .icon(IconName::FolderOpen)
+                                .label("Open")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if let Err(msg) = reveal_path(&open_path) {
+                                        this.show_toast(msg, cx);
+                                    }
+                                })),
+                        )
+                        .child(
+                            Button::new(SharedString::from(format!("remove-custom-dir-{i}")))
+                                .outline()
+                                .small()
+                                .icon(Icon::empty().path("icons/delete.svg"))
+                                .label("Remove")
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.remove_custom_game_directory(remove_path.clone(), window, cx);
+                                })),
+                        )
+                        .into_any_element()
+                }))
                 .child(settings_subgroup("App data", true, cx))
                 .child(
                     v_flex()
