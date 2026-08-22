@@ -338,11 +338,7 @@ impl LibraryApp {
                     .when(excluded || compacted, |b| b.primary())
                     .when(!excluded && !compacted, |b| b.outline())
                     .w_full()
-                    .icon(Icon::empty().path(if game.store.is_steam() {
-                        "icons/play.svg"
-                    } else {
-                        "icons/folder-open.svg"
-                    }))
+                    .icon(Icon::empty().path(game.store.launch_icon_path()))
                     .label(launch)
                     .disabled(busy)
                     .on_click({

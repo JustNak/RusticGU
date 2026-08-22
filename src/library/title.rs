@@ -90,6 +90,14 @@ impl LibraryStore {
             "Open folder"
         }
     }
+
+    pub fn launch_icon_path(self) -> &'static str {
+        if self.is_steam() {
+            "icons/play.svg"
+        } else {
+            "icons/folder-open.svg"
+        }
+    }
 }
 
 impl std::fmt::Display for LibraryStore {
@@ -303,6 +311,15 @@ mod tests {
         assert_eq!(
             LibraryStore::Extra(StoreId::Epic).launch_label(),
             "Open folder"
+        );
+        assert_eq!(LibraryStore::Steam.launch_icon_path(), "icons/play.svg");
+        assert_eq!(
+            LibraryStore::Custom.launch_icon_path(),
+            "icons/folder-open.svg"
+        );
+        assert_eq!(
+            LibraryStore::Extra(StoreId::Epic).launch_icon_path(),
+            "icons/folder-open.svg"
         );
     }
 

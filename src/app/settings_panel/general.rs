@@ -180,7 +180,7 @@ impl LibraryApp {
                                 .icon(IconName::FolderOpen)
                                 .label("Open")
                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                    if let Err(msg) = reveal_path(&open_path) {
+                                    if let Err(msg) = open_existing_folder(&open_path) {
                                         this.show_toast(msg, cx);
                                     }
                                 })),
@@ -241,4 +241,35 @@ impl LibraryApp {
 fn reveal_path(path: &std::path::Path) -> Result<(), String> {
     let _ = std::fs::create_dir_all(path);
     open::that(path).map_err(|e| format!("Could not open folder: {e}"))
+}
+
+fn open_existing_folder(path: &std::path::Path) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err("Folder is missing. Remove it or add it again.".into());
+    }
+    open::that(path).map_err(|e| format!("Could not open folder: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn open_existing_folder_does_not_create_missing_dir() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "rusticgu-open-existing-{}-{}",
+            std::process::id(),
+            nonce
+        ));
+        let _ = std::fs::remove_dir_all(&path);
+        assert!(!path.exists());
+        assert!(super::open_existing_folder(&path).is_err());
+        assert!(
+            !path.exists(),
+            "Open must not recreate a missing custom folder"
+        );
+        let _ = std::fs::remove_dir_all(&path);
+    }
 }

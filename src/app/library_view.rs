@@ -11,7 +11,7 @@ use crate::appearance::title_tint;
 use crate::branding::{APP_LOGO_DARK, APP_LOGO_LIGHT};
 use crate::covers::Monogram;
 use crate::format::format_bytes;
-use crate::library::LibraryTitle;
+use crate::library::{LibraryStore, LibraryTitle};
 use crate::settings::UiDensity;
 use gpui::{
     div, hsla, img, prelude::FluentBuilder, pulsating_between, px, Animation, AnimationExt,
@@ -423,7 +423,7 @@ fn render_poster_card(
                         &id,
                         group,
                         hover_spec,
-                        game.store.launch_label(),
+                        game.store,
                         busy,
                         cx,
                     ))
@@ -661,12 +661,13 @@ fn render_poster_veil(
     id: &str,
     group: SharedString,
     spec: PosterHoverSpec,
-    play_label: &'static str,
+    store: LibraryStore,
     busy: bool,
     cx: &mut Context<LibraryApp>,
 ) -> impl IntoElement {
     let theme = cx.theme().clone();
     let id = id.to_string();
+    let play_label = store.launch_label();
     // Stay mounted and do not occlude: inserting an occluding veil on hover
     // steals the card hitbox, which drops hover and flickers the actions.
     v_flex()
@@ -752,7 +753,7 @@ fn render_poster_veil(
                     .small()
                     .compact()
                     .w_full()
-                    .icon(Icon::empty().path("icons/play.svg"))
+                    .icon(Icon::empty().path(store.launch_icon_path()))
                     .label(play_label)
                     .tooltip(play_label)
                     .disabled(busy)
@@ -862,6 +863,11 @@ mod tests {
     fn hover_play_copy_follows_the_store() {
         assert_eq!(LibraryStore::Steam.launch_label(), "Play");
         assert_eq!(LibraryStore::Custom.launch_label(), "Open folder");
+        assert_eq!(LibraryStore::Steam.launch_icon_path(), "icons/play.svg");
+        assert_eq!(
+            LibraryStore::Custom.launch_icon_path(),
+            "icons/folder-open.svg"
+        );
     }
 
     #[test]
