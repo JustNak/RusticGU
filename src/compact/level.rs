@@ -55,10 +55,10 @@ impl CompactLevel {
 
     pub fn icon_path(self) -> &'static str {
         match self {
-            Self::Low => "icons/arrow-down.svg",
-            Self::Medium => "icons/minus.svg",
-            Self::High => "icons/arrow-up.svg",
-            Self::Maximum => "icons/file-archive.svg",
+            Self::Low => "icons/compact-low.svg",
+            Self::Medium => "icons/compact-medium.svg",
+            Self::High => "icons/compact-high.svg",
+            Self::Maximum => "icons/compact-maximum.svg",
         }
     }
 
@@ -137,6 +137,15 @@ mod tests {
         assert!(CompactLevel::ALL.iter().all(|l| l.tradeoff().len() < 40));
         assert_eq!(CompactLevel::ALL.len(), 4);
         assert_eq!(CompactLevel::default(), CompactLevel::Medium);
+        assert_eq!(
+            CompactLevel::ALL.map(|l| l.icon_path()),
+            [
+                "icons/compact-low.svg",
+                "icons/compact-medium.svg",
+                "icons/compact-high.svg",
+                "icons/compact-maximum.svg",
+            ]
+        );
         assert!(CompactLevel::Medium.recommended());
         assert!(!CompactLevel::High.recommended());
         assert!(!CompactLevel::Maximum.recommended());

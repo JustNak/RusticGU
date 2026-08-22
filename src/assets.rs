@@ -131,6 +131,10 @@ mod tests {
             "icons/plus.svg",
             "icons/empty-box.svg",
             "icons/file-archive.svg",
+            "icons/compact-low.svg",
+            "icons/compact-medium.svg",
+            "icons/compact-high.svg",
+            "icons/compact-maximum.svg",
             "icons/play.svg",
             "icons/undo-2.svg",
             "icons/rotate-cw.svg",
@@ -155,6 +159,10 @@ mod tests {
             assert!(
                 text.contains("<svg"),
                 "embedded asset {path} should look like an SVG"
+            );
+            assert!(
+                text.contains("currentColor"),
+                "embedded asset {path} should theme with currentColor"
             );
         }
     }
