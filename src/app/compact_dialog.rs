@@ -124,7 +124,7 @@ impl Render for CompactLevelPicker {
                                     .child(
                                         Icon::empty()
                                             .path(level.icon_path())
-                                            .with_size(px(18.))
+                                            .with_size(px(20.))
                                             .text_color(if on {
                                                 theme.foreground
                                             } else {
