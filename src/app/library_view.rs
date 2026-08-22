@@ -420,12 +420,7 @@ fn render_poster_card(
                 })
                 .when(!show_status, |el| {
                     el.child(render_poster_veil(
-                        &id,
-                        group,
-                        hover_spec,
-                        game.store,
-                        busy,
-                        cx,
+                        &id, group, hover_spec, game.store, busy, cx,
                     ))
                 }),
         )
