@@ -3,6 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::sync::Mutex;
+
 use super::vdf::{lookup_object, lookup_str, parse_vdf, VdfObject};
 
 /// SteamKit `EAppState` bits that mean a title is mid-update / validate / download.
@@ -82,6 +85,11 @@ pub fn scan_steam_library() -> Result<Vec<SteamGame>, String> {
 
 /// HKCU `Software\Valve\Steam\SteamPath`, then common install locations.
 pub fn steam_path() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = test_steam_root() {
+        return Some(path);
+    }
+
     #[cfg(windows)]
     {
         if let Some(path) = registry_steam_path() {
@@ -91,6 +99,41 @@ pub fn steam_path() -> Option<PathBuf> {
     typical_steam_paths()
         .into_iter()
         .find(|p| p.join("steam.exe").is_file() || p.join("steamapps").is_dir())
+}
+
+#[cfg(test)]
+static TEST_STEAM_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+#[cfg(test)]
+pub(crate) struct TestSteamRootGuard {
+    previous: Option<PathBuf>,
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_steam_root(path: &Path) -> TestSteamRootGuard {
+    let mut root = TEST_STEAM_ROOT
+        .lock()
+        .expect("test Steam root mutex poisoned");
+    let previous = root.replace(path.to_path_buf());
+    TestSteamRootGuard { previous }
+}
+
+#[cfg(test)]
+fn test_steam_root() -> Option<PathBuf> {
+    TEST_STEAM_ROOT
+        .lock()
+        .expect("test Steam root mutex poisoned")
+        .clone()
+}
+
+#[cfg(test)]
+impl Drop for TestSteamRootGuard {
+    fn drop(&mut self) {
+        let mut root = TEST_STEAM_ROOT
+            .lock()
+            .expect("test Steam root mutex poisoned");
+        *root = self.previous.take();
+    }
 }
 
 #[cfg(windows)]

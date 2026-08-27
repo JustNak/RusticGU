@@ -6,6 +6,8 @@ mod steam;
 mod title;
 mod vdf;
 
+#[cfg(test)]
+pub(crate) use steam::set_test_steam_root;
 #[allow(unused_imports)]
 pub use steam::{
     appmanifest_path, cheap_install_sizes, scan_library_folder, scan_steam_library,

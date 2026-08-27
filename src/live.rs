@@ -21,8 +21,7 @@ use crate::compact::{
     should_skip,
 };
 use crate::library::{
-    appmanifest_path, collect_library_folders, downloading_folder_present, scan_library_folder,
-    steam_path, LibraryTitle,
+    collect_library_folders, downloading_folder_present, steam_path, LibraryTitle,
 };
 use crate::settings::CompactAlgorithm;
 use shelf::default_denylist;
@@ -33,6 +32,12 @@ pub struct StoredPlan {
     pub install: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LockEntry {
+    compact: FileCompactState,
+    len: u64,
+}
+
 pub struct LiveInner {
     pub paused: AtomicBool,
     pub compact_busy: AtomicBool,
@@ -40,7 +45,7 @@ pub struct LiveInner {
     pub last_plan: Mutex<Option<StoredPlan>>,
     pub locked: Mutex<BTreeSet<String>>,
     pub installs: Mutex<HashMap<String, PathBuf>>,
-    pub snapshots: Mutex<HashMap<String, HashSet<PathBuf>>>,
+    pub snapshots: Mutex<HashMap<String, HashMap<PathBuf, LockEntry>>>,
 }
 
 impl LiveInner {
@@ -182,14 +187,32 @@ impl SteamStatus for DiskSteamStatus {
             return Ok(Vec::new());
         };
         let mut out = Vec::new();
+        let mut seen = HashSet::new();
         for folder in collect_library_folders(&steam) {
-            for game in scan_library_folder(&folder) {
-                let acf = appmanifest_path(&folder, game.app_id);
+            let steamapps = folder.join("steamapps");
+            let Ok(entries) = fs::read_dir(&steamapps) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                let Some(app_id) = name
+                    .strip_prefix("appmanifest_")
+                    .and_then(|name| name.strip_suffix(".acf"))
+                    .and_then(|name| name.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if seen.contains(&app_id) {
+                    continue;
+                }
+                let acf = entry.path();
                 let Ok(text) = fs::read_to_string(&acf) else {
                     continue;
                 };
-                let downloading = downloading_folder_present(&folder, game.app_id);
+                let downloading = downloading_folder_present(&folder, app_id);
                 if let Ok(status) = title_from_acf_text(&acf, &text, downloading) {
+                    seen.insert(app_id);
                     out.push(status);
                 }
             }
@@ -220,19 +243,41 @@ impl FileInventory for AppInventory {
             .ok()
             .and_then(|m| m.get(title_id).cloned());
         let mut files = Vec::new();
-        for path in collect_included_files(&root) {
+        if let Some(snapshot) = snapshot.as_ref() {
+            for (rel, entry) in snapshot {
+                let path = root.join(rel);
+                let Ok(metadata) = fs::metadata(&path) else {
+                    continue;
+                };
+                if !metadata.is_file() {
+                    continue;
+                }
+                let len = metadata.len();
+                let compact = match entry.compact {
+                    FileCompactState::Compressed if entry.len == len => entry.compact,
+                    _ => file_compact_state(&path),
+                };
+                files.push(InstallFile {
+                    relative_path: rel.clone(),
+                    compact,
+                    appeared_after_lock: false,
+                });
+            }
+        }
+        let delta = collect_included_files(&root);
+        for path in delta {
             if should_skip(&path) {
                 continue;
             }
             let rel = path.strip_prefix(&root).unwrap_or(&path).to_path_buf();
-            let appeared_after_lock = snapshot
-                .as_ref()
-                .map(|s| !s.contains(&rel))
-                .unwrap_or(false);
+            let is_baseline = snapshot.as_ref().is_some_and(|s| s.contains_key(&rel));
+            if is_baseline {
+                continue;
+            }
             files.push(InstallFile {
                 relative_path: rel,
                 compact: file_compact_state(&path),
-                appeared_after_lock,
+                appeared_after_lock: snapshot.is_some(),
             });
         }
         Ok(files)
@@ -255,6 +300,9 @@ impl Compactor for AppCompactor {
     fn unlock_compact(&mut self, title_id: &str) -> WatchResult<()> {
         if let Ok(mut locked) = self.inner.locked.lock() {
             locked.remove(title_id);
+        }
+        if let Ok(mut snapshots) = self.inner.snapshots.lock() {
+            snapshots.remove(title_id);
         }
         Ok(())
     }
@@ -301,12 +349,22 @@ fn snapshot_lock(inner: &LiveInner, title_id: &str) {
     let Some(root) = install else {
         return;
     };
-    let rels: HashSet<PathBuf> = collect_included_files(&root)
+    let baseline: HashMap<PathBuf, LockEntry> = collect_included_files(&root)
         .into_iter()
-        .filter_map(|p| p.strip_prefix(&root).ok().map(|r| r.to_path_buf()))
+        .filter_map(|path| {
+            let relative_path = path.strip_prefix(&root).ok()?.to_path_buf();
+            let len = fs::metadata(&path).ok()?.len();
+            Some((
+                relative_path,
+                LockEntry {
+                    compact: file_compact_state(&path),
+                    len,
+                },
+            ))
+        })
         .collect();
     if let Ok(mut snaps) = inner.snapshots.lock() {
-        snaps.insert(title_id.to_string(), rels);
+        snaps.insert(title_id.to_string(), baseline);
     }
 }
 
@@ -499,5 +557,229 @@ mod tests {
                 assert!(!files.iter().any(|f| f.ends_with("game.exe")));
             }
         }
+    }
+
+    static STEAM_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn product_source() -> &'static str {
+        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/live.rs"))
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap()
+    }
+
+    fn product_section(start_marker: &str, end_marker: &str) -> &'static str {
+        let source = product_source();
+        let start = source.find(start_marker).unwrap();
+        let source = &source[start..];
+        let end = source.find(end_marker).unwrap();
+        &source[..end]
+    }
+
+    struct SteamEnv {
+        home: Option<std::ffi::OsString>,
+        userprofile: Option<std::ffi::OsString>,
+    }
+
+    impl Drop for SteamEnv {
+        fn drop(&mut self) {
+            if let Some(home) = self.home.take() {
+                std::env::set_var("HOME", home);
+            } else {
+                std::env::remove_var("HOME");
+            }
+            if let Some(userprofile) = self.userprofile.take() {
+                std::env::set_var("USERPROFILE", userprofile);
+            } else {
+                std::env::remove_var("USERPROFILE");
+            }
+        }
+    }
+
+    fn with_steam_home<T>(home: &Path, f: impl FnOnce() -> T) -> T {
+        let _lock = STEAM_ENV_LOCK.lock().unwrap();
+        let _env = SteamEnv {
+            home: std::env::var_os("HOME"),
+            userprofile: std::env::var_os("USERPROFILE"),
+        };
+        std::env::set_var("HOME", home);
+        std::env::set_var("USERPROFILE", home);
+        let steam = home.join(".steam").join("steam");
+        let _steam_root = crate::library::set_test_steam_root(&steam);
+        f()
+    }
+
+    fn steam_fixture(tag: &str) -> (PathBuf, PathBuf) {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "rusticgu-live-{tag}-home-{}-{stamp}",
+            std::process::id()
+        ));
+        let steam = home.join(".steam").join("steam");
+        let steamapps = steam.join("steamapps");
+        std::fs::create_dir_all(&steamapps).unwrap();
+        std::fs::write(
+            steamapps.join("appmanifest_570.acf"),
+            r#"
+"AppState"
+{
+	"appid"		"570"
+	"name"		"Dota 2"
+	"StateFlags"		"1048576"
+	"installdir"		"dota 2 beta"
+	"BytesToDownload"		"100"
+	"BytesDownloaded"		"1"
+}
+"#,
+        )
+        .unwrap();
+        (home, steam)
+    }
+
+    fn install_fixture(tag: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-live-{tag}-install-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("game.exe"), b"game").unwrap();
+        root
+    }
+
+    #[test]
+    fn live_snapshot_reads_each_acf_once() {
+        let snapshot = product_section(
+            "impl SteamStatus for DiskSteamStatus",
+            "struct AppInventory",
+        );
+        assert!(snapshot.contains("DiskSteamStatus"));
+        assert!(
+            !snapshot.contains("scan_library_folder"),
+            "scan_library_folder must not be on the DiskSteamStatus snapshot path"
+        );
+        assert_eq!(
+            snapshot.matches("fs::read_to_string").count(),
+            1,
+            "DiskSteamStatus must read each ACF with read_to_string once"
+        );
+        assert!(snapshot.contains("title_from_acf_text"));
+
+        let (home, steam) = steam_fixture("snapshot");
+        let fixture = steam.join("steamapps").join("appmanifest_570.acf");
+        assert!(
+            fixture.is_file(),
+            "fixture appmanifest_570.acf must exist at {}",
+            fixture.display()
+        );
+        let statuses = with_steam_home(&home, || {
+            let resolved_steam = steam_path();
+            assert_eq!(resolved_steam, Some(steam.clone()));
+            assert_ne!(
+                resolved_steam,
+                std::env::var_os("HOME").map(PathBuf::from),
+                "Steam fixture must not rely only on HOME"
+            );
+            assert_ne!(
+                resolved_steam,
+                std::env::var_os("USERPROFILE").map(PathBuf::from),
+                "Steam fixture must not rely only on USERPROFILE"
+            );
+            DiskSteamStatus.snapshot()
+        })
+        .unwrap();
+        assert_eq!(statuses.len(), 1);
+        assert_eq!(statuses[0].app_id, 570);
+        assert_eq!(
+            statuses[0].state_flags, DOWNLOADING,
+            "StateFlags / DOWNLOADING patching signal must survive the snapshot"
+        );
+        assert!(statuses[0].is_patching());
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn unlock_inventory_reuses_lock_baseline() {
+        let product = product_source();
+        assert!(product.contains("struct LockEntry"));
+        assert!(product.contains("FileCompactState::Compressed"));
+        assert!(product.contains("appeared_after_lock"));
+        let inventory_source =
+            product_section("impl FileInventory for AppInventory", "struct AppCompactor");
+        assert!(
+            inventory_source.contains("let delta = collect_included_files(&root)"),
+            "collect_included_files must be delta-only after snapshot_lock"
+        );
+        assert_eq!(
+            inventory_source
+                .matches("collect_included_files(&root)")
+                .count(),
+            1,
+            "collect_included_files is not a second full inventory on unlock"
+        );
+        assert!(inventory_source.contains("entry.compact"));
+        assert!(inventory_source.contains("entry.len"));
+
+        let inventory_fixture = inventory();
+        let lock_baseline = inventory_fixture
+            .files
+            .get("570")
+            .unwrap()
+            .iter()
+            .find(|file| !file.appeared_after_lock)
+            .unwrap();
+        assert_eq!(
+            lock_baseline.compact,
+            FileCompactState::Compressed,
+            "FileCompactState::Compressed is a reusable lock baseline"
+        );
+
+        let root = install_fixture("unlock");
+        let live = LiveHandle::for_tests();
+        live.inner
+            .installs
+            .lock()
+            .unwrap()
+            .insert("570".into(), root.clone());
+        snapshot_lock(&live.inner, "570");
+        let inventory = AppInventory {
+            inner: live.inner.clone(),
+        };
+        let before = inventory.list_install_files("570").unwrap();
+        assert!(before.iter().any(|file| {
+            file.relative_path == PathBuf::from("game.exe") && !file.appeared_after_lock
+        }));
+
+        let new_patch = root.join("new_patch.vpk");
+        std::fs::write(&new_patch, b"patch").unwrap();
+        let after = inventory.list_install_files("570").unwrap();
+        let patch = after
+            .iter()
+            .find(|file| file.relative_path == PathBuf::from("new_patch.vpk"))
+            .unwrap();
+        assert!(
+            patch.appeared_after_lock,
+            "new_patch.vpk must be marked appeared_after_lock"
+        );
+        assert!(after.iter().any(|file| {
+            file.relative_path == PathBuf::from("game.exe") && !file.appeared_after_lock
+        }));
+
+        let mut compactor = AppCompactor {
+            inner: live.inner.clone(),
+        };
+        compactor.unlock_compact("570").unwrap();
+        assert!(live.inner.snapshots.lock().unwrap().get("570").is_none());
+        assert!(
+            !live_compact_should_apply(false, true),
+            "compact_busy must gate apply"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }
