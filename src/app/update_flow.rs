@@ -278,8 +278,8 @@ impl LibraryApp {
     }
 
     pub(crate) fn begin_apply_update(&mut self, info: UpdateInfo, cx: &mut Context<Self>) {
-        if self.update_busy {
-            self.show_toast("An update is already in progress…", cx);
+        if let Some(message) = apply_update_busy_message(self.update_busy, self.compact_busy) {
+            self.show_toast(message, cx);
             return;
         }
         // Invalidate any in-flight check so a late result cannot clear busy mid-handoff.
@@ -338,6 +338,14 @@ impl LibraryApp {
 
         // Bypass close-to-tray / hidden-window paint so quit actually tears down.
         self.force_quit_app(cx);
+    }
+}
+
+fn apply_update_busy_message(update_busy: bool, compact_busy: bool) -> Option<&'static str> {
+    match (update_busy, compact_busy) {
+        (true, _) => Some("An update is already in progress…"),
+        (false, true) => Some("A compact job is already running."),
+        _ => None,
     }
 }
 
@@ -633,6 +641,14 @@ code fence
         assert!(out.contains("[Open notes](https://example.com)"));
         assert!(!out.contains("<!--"));
         assert!(!out.contains("generated"));
+    }
+
+    #[test]
+    fn begin_apply_update_refuses_when_compact_busy() {
+        assert_eq!(
+            apply_update_busy_message(false, true),
+            Some("A compact job is already running.")
+        );
     }
 
     #[test]
