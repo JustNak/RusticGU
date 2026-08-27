@@ -344,6 +344,7 @@ impl LibraryApp {
 fn apply_update_busy_message(update_busy: bool, compact_busy: bool) -> Option<&'static str> {
     match (update_busy, compact_busy) {
         (true, _) => Some("An update is already in progress…"),
+        (false, true) => Some("A compact job is already running."),
         _ => None,
     }
 }
