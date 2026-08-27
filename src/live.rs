@@ -21,8 +21,7 @@ use crate::compact::{
     should_skip,
 };
 use crate::library::{
-    appmanifest_path, collect_library_folders, downloading_folder_present, scan_library_folder,
-    steam_path, LibraryTitle,
+    collect_library_folders, downloading_folder_present, steam_path, LibraryTitle,
 };
 use crate::settings::CompactAlgorithm;
 use shelf::default_denylist;
@@ -33,6 +32,12 @@ pub struct StoredPlan {
     pub install: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LockEntry {
+    compact: FileCompactState,
+    len: u64,
+}
+
 pub struct LiveInner {
     pub paused: AtomicBool,
     pub compact_busy: AtomicBool,
@@ -40,7 +45,7 @@ pub struct LiveInner {
     pub last_plan: Mutex<Option<StoredPlan>>,
     pub locked: Mutex<BTreeSet<String>>,
     pub installs: Mutex<HashMap<String, PathBuf>>,
-    pub snapshots: Mutex<HashMap<String, HashSet<PathBuf>>>,
+    pub snapshots: Mutex<HashMap<String, HashMap<PathBuf, LockEntry>>>,
 }
 
 impl LiveInner {
@@ -182,14 +187,32 @@ impl SteamStatus for DiskSteamStatus {
             return Ok(Vec::new());
         };
         let mut out = Vec::new();
+        let mut seen = HashSet::new();
         for folder in collect_library_folders(&steam) {
-            for game in scan_library_folder(&folder) {
-                let acf = appmanifest_path(&folder, game.app_id);
+            let steamapps = folder.join("steamapps");
+            let Ok(entries) = fs::read_dir(&steamapps) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                let Some(app_id) = name
+                    .strip_prefix("appmanifest_")
+                    .and_then(|name| name.strip_suffix(".acf"))
+                    .and_then(|name| name.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if seen.contains(&app_id) {
+                    continue;
+                }
+                let acf = entry.path();
                 let Ok(text) = fs::read_to_string(&acf) else {
                     continue;
                 };
-                let downloading = downloading_folder_present(&folder, game.app_id);
+                let downloading = downloading_folder_present(&folder, app_id);
                 if let Ok(status) = title_from_acf_text(&acf, &text, downloading) {
+                    seen.insert(app_id);
                     out.push(status);
                 }
             }
@@ -220,19 +243,41 @@ impl FileInventory for AppInventory {
             .ok()
             .and_then(|m| m.get(title_id).cloned());
         let mut files = Vec::new();
-        for path in collect_included_files(&root) {
+        if let Some(snapshot) = snapshot.as_ref() {
+            for (rel, entry) in snapshot {
+                let path = root.join(rel);
+                let Ok(metadata) = fs::metadata(&path) else {
+                    continue;
+                };
+                if !metadata.is_file() {
+                    continue;
+                }
+                let len = metadata.len();
+                let compact = match entry.compact {
+                    FileCompactState::Compressed if entry.len == len => entry.compact,
+                    _ => file_compact_state(&path),
+                };
+                files.push(InstallFile {
+                    relative_path: rel.clone(),
+                    compact,
+                    appeared_after_lock: false,
+                });
+            }
+        }
+        let delta = collect_included_files(&root);
+        for path in delta {
             if should_skip(&path) {
                 continue;
             }
             let rel = path.strip_prefix(&root).unwrap_or(&path).to_path_buf();
-            let appeared_after_lock = snapshot
-                .as_ref()
-                .map(|s| !s.contains(&rel))
-                .unwrap_or(false);
+            let is_baseline = snapshot.as_ref().is_some_and(|s| s.contains_key(&rel));
+            if is_baseline {
+                continue;
+            }
             files.push(InstallFile {
                 relative_path: rel,
                 compact: file_compact_state(&path),
-                appeared_after_lock,
+                appeared_after_lock: snapshot.is_some(),
             });
         }
         Ok(files)
@@ -255,6 +300,9 @@ impl Compactor for AppCompactor {
     fn unlock_compact(&mut self, title_id: &str) -> WatchResult<()> {
         if let Ok(mut locked) = self.inner.locked.lock() {
             locked.remove(title_id);
+        }
+        if let Ok(mut snapshots) = self.inner.snapshots.lock() {
+            snapshots.remove(title_id);
         }
         Ok(())
     }
@@ -301,12 +349,22 @@ fn snapshot_lock(inner: &LiveInner, title_id: &str) {
     let Some(root) = install else {
         return;
     };
-    let rels: HashSet<PathBuf> = collect_included_files(&root)
+    let baseline: HashMap<PathBuf, LockEntry> = collect_included_files(&root)
         .into_iter()
-        .filter_map(|p| p.strip_prefix(&root).ok().map(|r| r.to_path_buf()))
+        .filter_map(|path| {
+            let relative_path = path.strip_prefix(&root).ok()?.to_path_buf();
+            let len = fs::metadata(&path).ok()?.len();
+            Some((
+                relative_path,
+                LockEntry {
+                    compact: file_compact_state(&path),
+                    len,
+                },
+            ))
+        })
         .collect();
     if let Ok(mut snaps) = inner.snapshots.lock() {
-        snaps.insert(title_id.to_string(), rels);
+        snaps.insert(title_id.to_string(), baseline);
     }
 }
 
