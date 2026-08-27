@@ -6,6 +6,8 @@ mod steam;
 mod title;
 mod vdf;
 
+#[cfg(test)]
+pub(crate) use steam::set_test_steam_root;
 #[allow(unused_imports)]
 pub use steam::{
     appmanifest_path, cheap_install_sizes, scan_library_folder, scan_steam_library,
@@ -17,8 +19,6 @@ pub use steam::{
     is_steam_title_updating, library_paths_from_vdf, state_flags_from_acf,
     state_flags_indicate_update, steam_path, steam_updating_app_id,
 };
-#[cfg(test)]
-pub(crate) use steam::set_test_steam_root;
 #[allow(unused_imports)]
 pub use vdf::{parse_vdf, VdfObject, VdfValue};
 
