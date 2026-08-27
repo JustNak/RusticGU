@@ -18,7 +18,7 @@ pub use steam::{
     state_flags_indicate_update, steam_path, steam_updating_app_id,
 };
 #[cfg(test)]
-pub(crate) use steam::{set_test_steam_root, TestSteamRootGuard};
+pub(crate) use steam::set_test_steam_root;
 #[allow(unused_imports)]
 pub use vdf::{parse_vdf, VdfObject, VdfValue};
 
