@@ -604,6 +604,8 @@ mod tests {
         };
         std::env::set_var("HOME", home);
         std::env::set_var("USERPROFILE", home);
+        let steam = home.join(".steam").join("steam");
+        let _steam_root = crate::library::set_test_steam_root(&steam);
         f()
     }
 
@@ -676,7 +678,22 @@ mod tests {
             "fixture appmanifest_570.acf must exist at {}",
             fixture.display()
         );
-        let statuses = with_steam_home(&home, || DiskSteamStatus.snapshot()).unwrap();
+        let statuses = with_steam_home(&home, || {
+            let resolved_steam = steam_path();
+            assert_eq!(resolved_steam, Some(steam.clone()));
+            assert_ne!(
+                resolved_steam,
+                std::env::var_os("HOME").map(PathBuf::from),
+                "Steam fixture must not rely only on HOME"
+            );
+            assert_ne!(
+                resolved_steam,
+                std::env::var_os("USERPROFILE").map(PathBuf::from),
+                "Steam fixture must not rely only on USERPROFILE"
+            );
+            DiskSteamStatus.snapshot()
+        })
+        .unwrap();
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].app_id, 570);
         assert_eq!(
