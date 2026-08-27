@@ -15,6 +15,8 @@ pub fn run_silent_installer(path: &Path, progress: &dyn ProgressSink) -> Result<
         return Err(format!("Installer missing: {}", path.display()));
     }
 
+    verify_installer_authenticode(path)?;
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -54,6 +56,82 @@ pub fn run_silent_installer(path: &Path, progress: &dyn ProgressSink) -> Result<
             return Err(format!("Installer exited with code {:?}.", status.code()));
         }
         Ok(())
+    }
+}
+
+fn verify_installer_authenticode(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::GUID;
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::Security::WinTrust::{
+            WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2, WINTRUST_DATA, WINTRUST_DATA_0,
+            WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL, WTD_CHOICE_FILE, WTD_REVOKE_NONE,
+            WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY, WTD_UI_NONE,
+        };
+
+        let wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let mut file_info = WINTRUST_FILE_INFO {
+            cbStruct: std::mem::size_of::<WINTRUST_FILE_INFO>() as u32,
+            pcwszFilePath: windows::core::PCWSTR(wide.as_ptr()),
+            ..Default::default()
+        };
+
+        let mut data = WINTRUST_DATA {
+            cbStruct: std::mem::size_of::<WINTRUST_DATA>() as u32,
+            dwUIChoice: WTD_UI_NONE,
+            fdwRevocationChecks: WTD_REVOKE_NONE,
+            dwUnionChoice: WTD_CHOICE_FILE,
+            Anonymous: WINTRUST_DATA_0 {
+                pFile: std::ptr::from_mut(&mut file_info),
+            },
+            dwStateAction: WTD_STATEACTION_VERIFY,
+            dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
+            ..Default::default()
+        };
+
+        let mut action: GUID = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+        let status = unsafe {
+            WinVerifyTrust(
+                HWND::default(),
+                std::ptr::from_mut(&mut action),
+                std::ptr::from_mut(&mut data).cast(),
+            )
+        };
+
+        data.dwStateAction = WTD_STATEACTION_CLOSE;
+        unsafe {
+            let _ = WinVerifyTrust(
+                HWND::default(),
+                std::ptr::from_mut(&mut action),
+                std::ptr::from_mut(&mut data).cast(),
+            );
+        }
+
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!(
+                "Installer rejected: Authenticode verification failed (WinVerifyTrust status 0x{:08X}). \
+The update is unsigned, tampered, or not trusted. Install manually from the release page.",
+                status as u32
+            ))
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err(
+            "Installer rejected: Authenticode verification failed (WinVerifyTrust). \
+The installer cannot be verified on this platform."
+                .into(),
+        )
     }
 }
 
