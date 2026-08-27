@@ -111,7 +111,9 @@ pub(crate) struct TestSteamRootGuard {
 
 #[cfg(test)]
 pub(crate) fn set_test_steam_root(path: &Path) -> TestSteamRootGuard {
-    let mut root = TEST_STEAM_ROOT.lock().expect("test Steam root mutex poisoned");
+    let mut root = TEST_STEAM_ROOT
+        .lock()
+        .expect("test Steam root mutex poisoned");
     let previous = root.replace(path.to_path_buf());
     TestSteamRootGuard { previous }
 }
@@ -127,7 +129,9 @@ fn test_steam_root() -> Option<PathBuf> {
 #[cfg(test)]
 impl Drop for TestSteamRootGuard {
     fn drop(&mut self) {
-        let mut root = TEST_STEAM_ROOT.lock().expect("test Steam root mutex poisoned");
+        let mut root = TEST_STEAM_ROOT
+            .lock()
+            .expect("test Steam root mutex poisoned");
         *root = self.previous.take();
     }
 }
