@@ -27,14 +27,6 @@ const MIN_IMAGE_BYTES: usize = 64;
 const PORTRAIT_W: u32 = 600;
 const PORTRAIT_H: u32 = 900;
 
-/// How a title should be drawn on the gallery wall.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CoverKind {
-    Art,
-    Monogram,
-}
-
 /// Letters shown on a monogram tile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Monogram {
@@ -92,15 +84,6 @@ pub fn extra_cover_cache_path(app_data_root: &Path, title_id: &str) -> PathBuf {
         .join("covers")
         .join("extra")
         .join(format!("{safe}.img"))
-}
-
-#[allow(dead_code)]
-pub fn cover_kind_for(cached: Option<&Path>, local_index: Option<&Path>) -> CoverKind {
-    if cached.is_some_and(path_is_usable_image) || local_index.is_some_and(path_is_usable_image) {
-        CoverKind::Art
-    } else {
-        CoverKind::Monogram
-    }
 }
 
 pub fn bytes_look_like_image(bytes: &[u8]) -> bool {
@@ -542,25 +525,6 @@ pub fn monogram_initials(name: &str) -> String {
     }
 }
 
-#[allow(dead_code)]
-pub fn initial_cover_kind(title: &LibraryTitle, resolved: Option<&Path>) -> CoverKind {
-    match title.store {
-        LibraryStore::Steam => {
-            if resolved.is_some_and(path_is_usable_image) {
-                CoverKind::Art
-            } else {
-                CoverKind::Monogram
-            }
-        }
-        LibraryStore::Extra(_) | LibraryStore::Custom => cover_kind_for(None, resolved),
-    }
-}
-
-#[allow(dead_code)]
-pub fn empty_rgba(width: u32, height: u32) -> RgbaImage {
-    RgbaImage::new(width.max(1), height.max(1))
-}
-
 fn hash_from_relative_path(rel: &str) -> Option<String> {
     let rel = rel.replace('\\', "/");
     let mut parts = rel.split('/');
@@ -829,11 +793,7 @@ mod tests {
 
     #[test]
     fn monogram_when_no_art() {
-        assert_eq!(cover_kind_for(None, None), CoverKind::Monogram);
-        let missing = PathBuf::from("/no/such/rusticgu/cover.jpg");
-        assert_eq!(cover_kind_for(Some(&missing), None), CoverKind::Monogram);
         let title = steam_title(1, "Hades");
-        assert_eq!(initial_cover_kind(&title, None), CoverKind::Monogram);
         let mono = Monogram::from_title(&title);
         assert_eq!(mono.initials, "H");
         assert_eq!(mono.store.as_ref(), "Steam");
@@ -863,7 +823,6 @@ mod tests {
             find_local_cover(&root).is_none(),
             "landscape must not be used"
         );
-        assert_eq!(initial_cover_kind(&title, None), CoverKind::Monogram);
 
         let ico = root.join("icon.ico");
         std::fs::write(&ico, {
@@ -930,7 +889,6 @@ mod tests {
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         std::fs::write(&dest, tiny_jpeg()).unwrap();
         assert!(path_is_usable_image(&dest));
-        assert_eq!(cover_kind_for(Some(&dest), None), CoverKind::Art);
         assert_eq!(
             resolve_local_cover_file(&root, &steam_title(440, "TF2"), None).as_deref(),
             Some(dest.as_path())
