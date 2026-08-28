@@ -38,12 +38,10 @@ use crate::activate::ActivateBridge;
 use crate::appearance::{
     apply_appearance, film_grain_image, noise_enabled, vignette_edge_alpha, vignette_enabled,
 };
-use crate::compact::{
-    apply_compact_force, estimate_compact, estimate_compact_with, CompactOp, CompactProgress,
-};
+use crate::compact::{apply_compact_force, CompactOp, CompactProgress};
 use crate::library::{
-    algorithm_from_policy, scan_library, shelf_policy_for, steam_title_id,
-    title_is_compact_excluded, LibraryTitle, ScanOptions,
+    scan_library, shelf_policy_for, steam_title_id, title_is_compact_excluded, LibraryTitle,
+    ScanOptions,
 };
 use crate::live::LiveHandle;
 use crate::persistence::{
@@ -497,41 +495,6 @@ impl LibraryApp {
     pub(crate) fn selected_game(&self) -> Option<&LibraryTitle> {
         let id = self.selected_id.as_ref()?;
         self.games.iter().find(|g| g.id == *id)
-    }
-
-    fn compact_algorithm_for(
-        &self,
-        title: &LibraryTitle,
-        is_launching: bool,
-    ) -> Option<CompactAlgorithm> {
-        let policy = shelf_policy_for(title, is_launching);
-        algorithm_from_policy(&policy, self.settings.compact_algorithm)
-    }
-
-    pub(crate) fn estimate_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(game) = self.selected_game().cloned() else {
-            self.show_toast("Select a game first.", cx);
-            return;
-        };
-        if title_is_compact_excluded(&game) {
-            self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
-            return;
-        }
-        let Some(algorithm) = self.compact_algorithm_for(&game, false) else {
-            self.show_error_toast(format!("{} is auto-excluded from compact.", game.name), cx);
-            return;
-        };
-        let estimate = if algorithm == CompactAlgorithm::Lzx {
-            estimate_compact_with(&game.install_path, algorithm)
-        } else {
-            estimate_compact(&game.install_path, algorithm)
-        };
-        match estimate {
-            Ok(estimate) => {
-                self.open_estimate_dialog(window, cx, estimate, game.name);
-            }
-            Err(msg) => self.show_error_toast(msg, cx),
-        }
     }
 
     pub(crate) fn start_compact(
