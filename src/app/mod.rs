@@ -1,6 +1,5 @@
 mod about_dialog;
 mod compact_apply;
-mod compact_dialog;
 mod compact_flow;
 mod confirm_dialogs;
 mod cover_flow;
