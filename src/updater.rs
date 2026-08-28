@@ -159,7 +159,6 @@ async fn fetch_nightly_release(client: &reqwest::Client) -> Result<GhRelease, St
         .await
         .map_err(|e| format!("Could not parse GitHub releases list: {e}"))?;
 
-    // GitHub returns newest first; take the first published nightly with a setup asset.
     releases
         .into_iter()
         .find(is_published_nightly)
@@ -198,8 +197,6 @@ fn compare_release(release: GhRelease, channel: UpdateChannel) -> Result<UpdateC
             )
         })?;
 
-    // Keep enough body for the post-update What’s new dialog; the pre-install
-    // consent dialog applies its own shorter truncation when rendering.
     let notes = release
         .body
         .as_ref()
@@ -245,7 +242,6 @@ pub async fn download_installer(download_url: &str) -> Result<PathBuf, String> {
         .map_err(|e| format!("Could not create temp folder: {e}"))?;
 
     let installer_path = temp_dir.join(SETUP_ASSET_NAME);
-    // Replace any previous partial download.
     let _ = tokio::fs::remove_file(&installer_path).await;
 
     let mut file = tokio::fs::File::create(&installer_path)
@@ -290,11 +286,9 @@ pub fn launch_installer(path: &std::path::Path, silent_relaunch: bool) -> Result
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        // DETACHED_PROCESS so the installer outlives us when we quit for the update.
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         let mut cmd = std::process::Command::new(path);
-        // cargo-packager NSIS: /S = silent, /R = relaunch app after success.
         if silent_relaunch {
             cmd.args(["/S", "/R"]);
         }
@@ -412,11 +406,6 @@ pub fn launch_updater(opts: &LaunchUpdaterOpts) -> Result<(), String> {
 fn spawn_detached_windows(exe: &std::path::Path, args: &[String]) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
 
-    // DETACHED_PROCESS: outlive the parent when it quits for the update.
-    // CREATE_NEW_PROCESS_GROUP: independent console/signal group.
-    // CREATE_BREAKAWAY_FROM_JOB: leave the parent's job so KILL_ON_JOB_CLOSE
-    // does not tear the updater down when the main app exits (best-effort; the
-    // job must allow breakaway).
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
@@ -430,7 +419,6 @@ fn spawn_detached_windows(exe: &std::path::Path, args: &[String]) -> Result<(), 
     {
         Ok(_) => Ok(()),
         Err(e) if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
-            // Fall back without breakaway first (some jobs disallow it), then ShellExecute.
             let mut retry = std::process::Command::new(exe);
             retry.args(args);
             match retry
@@ -445,7 +433,6 @@ fn spawn_detached_windows(exe: &std::path::Path, args: &[String]) -> Result<(), 
             }
         }
         Err(e) => {
-            // Some restricted jobs reject CREATE_BREAKAWAY_FROM_JOB.
             let mut retry = std::process::Command::new(exe);
             retry.args(args);
             match retry
@@ -484,7 +471,6 @@ fn shell_execute_detached(exe: &std::path::Path, args: &[String]) -> Result<(), 
             if i > 0 {
                 joined.push(' ');
             }
-            // Quote args with spaces; updater paths/URLs are already simple.
             if arg.chars().any(|c| c.is_whitespace()) {
                 joined.push('"');
                 joined.push_str(&arg.replace('"', "\\\""));
@@ -496,7 +482,6 @@ fn shell_execute_detached(exe: &std::path::Path, args: &[String]) -> Result<(), 
         wide(std::ffi::OsStr::new(&joined))
     };
 
-    // Verb left null → "open". If the PE still requires elevation, Windows shows UAC.
     let mut info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
         fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
@@ -514,7 +499,6 @@ fn shell_execute_detached(exe: &std::path::Path, args: &[String]) -> Result<(), 
         ));
     }
 
-    // Detach immediately; do not wait for the update to finish.
     if !info.hProcess.is_invalid() {
         unsafe {
             let _ = CloseHandle(info.hProcess);
@@ -680,7 +664,6 @@ fn parse_semverish(s: &str) -> Option<Semverish> {
     if s.is_empty() {
         return None;
     }
-    // Build metadata (`+…`) is ignored for precedence.
     let s = s.split_once('+').map(|(core, _)| core).unwrap_or(s);
     let (core, pre) = match s.split_once('-') {
         Some((core, rest)) if !rest.is_empty() => (core, Some(rest)),
@@ -753,13 +736,11 @@ mod tests {
 
     #[test]
     fn channel_switch_offers_that_stream_regardless_of_semver() {
-        // Stable → Nightly: take nightly even when its core version is lower.
         assert!(should_offer_on_channel(
             "0.3.1-nightly.20260813155600",
             "0.3.2",
             UpdateChannel::Nightly
         ));
-        // Nightly → Stable: take stable even when the nightly is “ahead”.
         assert!(should_offer_on_channel(
             "0.3.1",
             "0.3.2-nightly.20260813155600",
@@ -770,7 +751,6 @@ mod tests {
             "0.3.2-nightly.20260813155600",
             UpdateChannel::Stable
         ));
-        // Same-core Nightly over the matching Stable (toggle to Nightly).
         assert!(should_offer_on_channel(
             "0.3.1-nightly.20260813155600",
             "0.3.1",
@@ -782,7 +762,6 @@ mod tests {
             "0.3.1",
             UpdateChannel::Stable
         ));
-        // Already on that exact nightly.
         assert!(!should_offer_on_channel(
             "0.3.1-nightly.20260813155600",
             "0.3.1-nightly.20260813155600",
@@ -807,7 +786,6 @@ mod tests {
             "0.3.2",
             UpdateChannel::Stable
         ));
-        // Newer local/dev Stable is not downgraded while staying on Stable.
         assert!(!should_offer_on_channel(
             "0.3.2",
             "0.3.3",

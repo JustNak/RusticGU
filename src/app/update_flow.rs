@@ -94,7 +94,6 @@ impl LibraryApp {
         result: Result<UpdateCheck, String>,
         cx: &mut Context<Self>,
     ) {
-        // Channel switch (or a newer check / apply) invalidates this completion.
         if check_gen != self.update_check_gen {
             return;
         }
@@ -105,15 +104,12 @@ impl LibraryApp {
                 if interactive {
                     self.replace_update_toast("You're up to date", ToastKind::Info, None, cx);
                 } else {
-                    // Drop the checking toast if a silent check somehow set one.
                     self.clear_update_toast(cx);
                 }
             }
             Ok(UpdateCheck::Available(info)) => {
                 self.available_update = Some(info.clone());
                 self.update_busy = false;
-                // Interactive and silent: toast with [Update] so the user can continue
-                // without hunting the brand menu.
                 self.show_update_available_toast(&info, cx);
             }
             Err(message) => {
@@ -178,7 +174,6 @@ impl LibraryApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Ack on open so Esc / mouse-back via `close_dialog` (no on_close) cannot re-show.
         self.ack_whats_new(cx);
 
         let to = pending.to_version.clone();
@@ -259,7 +254,6 @@ impl LibraryApp {
             dialog
                 .title(title)
                 .alert()
-                // alert() disables outside-click; re-enable for light dismiss UX.
                 .overlay_closable(true)
                 .keyboard(true)
                 .w(px(460.))
@@ -282,7 +276,6 @@ impl LibraryApp {
             self.show_toast(message, cx);
             return;
         }
-        // Invalidate any in-flight check so a late result cannot clear busy mid-handoff.
         self.update_check_gen = self.update_check_gen.wrapping_add(1);
         self.update_busy = true;
         self.begin_apply_update_inner(info, cx);
@@ -298,7 +291,6 @@ impl LibraryApp {
         );
         cx.notify();
 
-        // Persist before spawn/quit so a kill during install cannot race a dirty save.
         self.flush_state_now();
         self.flush_window_layout_now();
 
@@ -308,7 +300,6 @@ impl LibraryApp {
             info.current_version.clone()
         };
 
-        // Snapshot notes now so the relaunched binary can show them without GitHub.
         let pending = PendingWhatsNew {
             from_version: from_version.clone(),
             to_version: info.latest_version.clone(),
@@ -327,8 +318,6 @@ impl LibraryApp {
         };
 
         if let Err(message) = launch_updater(&opts) {
-            // Handoff failed: discard the snapshot so a normal start does not
-            // claim an update that never applied.
             let _ = clear_pending_whats_new(&self.paths);
             self.update_busy = false;
             self.replace_update_toast(message, ToastKind::Error, None, cx);
@@ -336,7 +325,6 @@ impl LibraryApp {
             return;
         }
 
-        // Bypass close-to-tray / hidden-window paint so quit actually tears down.
         self.force_quit_app(cx);
     }
 }

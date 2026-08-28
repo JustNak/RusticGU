@@ -284,7 +284,6 @@ mod tests {
             "apply must still see dstorage: {err}"
         );
 
-        // Override still allowed: decision becomes Apply (may fail later on non-NTFS CI).
         match decide_compact_apply(&root, true) {
             CompactApplyDecision::Apply | CompactApplyDecision::Refuse(_) => {}
             CompactApplyDecision::SkipDirectStorage => {

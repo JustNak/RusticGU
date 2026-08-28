@@ -58,7 +58,6 @@ pub fn discover(
             ));
             return (titles, warnings);
         }
-        // Optional sidecar is allowed; ownership paths are not.
         match read_json_index(fs, index) {
             Ok(extra) => {
                 for t in extra {

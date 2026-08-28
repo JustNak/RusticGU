@@ -6,7 +6,6 @@ use std::path::Path;
 ///
 /// `wav`, `dds`, and `bnk` are intentionally **not** on this list.
 const SKIP_EXTENSIONS: &[&str] = &[
-    // video
     "bik",
     "bk2",
     "bik2",
@@ -22,7 +21,7 @@ const SKIP_EXTENSIONS: &[&str] = &[
     "m4v",
     "vob",
     "usm",
-    "ivf", // audio (not wav)
+    "ivf",
     "mp3",
     "ogg",
     "wma",
@@ -33,7 +32,6 @@ const SKIP_EXTENSIONS: &[&str] = &[
     "wem",
     "fsb",
     "xwma",
-    // images / textures (not dds)
     "jpg",
     "jpeg",
     "png",
@@ -46,7 +44,6 @@ const SKIP_EXTENSIONS: &[&str] = &[
     "pvr",
     "crn",
     "tfc",
-    // archives
     "zip",
     "7z",
     "rar",
@@ -63,7 +60,7 @@ const SKIP_EXTENSIONS: &[&str] = &[
     "lz4",
     "lzma",
     "zst",
-    "zstd", // logs / temp
+    "zstd",
     "log",
     "dmp",
     "tmp",
@@ -222,7 +219,6 @@ fn extension_lower(path: &Path) -> Option<String> {
 }
 
 pub fn path_has_skipped_dir(path: &Path) -> bool {
-    // Split on both separators so Windows-style fixtures still match on Linux CI hosts.
     let raw = path.to_string_lossy().replace('\\', "/");
     let parts: Vec<String> = raw
         .split('/')

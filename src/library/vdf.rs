@@ -302,7 +302,6 @@ mod tests {
     #[test]
     fn comments_and_bare_keys() {
         let src = r#"
-// header
 AppState
 {
 	appid 570

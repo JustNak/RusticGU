@@ -15,7 +15,6 @@ pub fn apply_app_icon(window: &gpui::Window) {
             LR_LOADFROMFILE, WM_SETICON,
         };
 
-        // Prefer the raw-window-handle trait method (not gpui's AnyWindowHandle helper).
         let Ok(handle) = HasWindowHandle::window_handle(window) else {
             return;
         };

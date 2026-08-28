@@ -122,7 +122,6 @@ where
             }
         }
 
-        // Titles that vanished from the snapshot while locked: unlock without /F.
         let stale: Vec<String> = self
             .locked
             .iter()

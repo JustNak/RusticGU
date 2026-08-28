@@ -176,7 +176,6 @@ impl Drop for SystemTray {
             use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
             use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
 
-            // Stop accepting new balloons before teardown (swap so we keep the HWND).
             let raw = self.hwnd.swap(0, std::sync::atomic::Ordering::SeqCst);
             if raw != 0 {
                 let hwnd = HWND(raw as *mut core::ffi::c_void);
@@ -185,8 +184,6 @@ impl Drop for SystemTray {
                 };
             }
             if let Some(handle) = self.thread.take() {
-                // Bounded wait: a stuck tray message loop must not freeze quit forever.
-                // Callers that must not block the UI use a detached drop thread instead.
                 let (done_tx, done_rx) = std::sync::mpsc::channel();
                 std::thread::spawn(move || {
                     let _ = handle.join();
@@ -194,7 +191,6 @@ impl Drop for SystemTray {
                 });
                 let _ = done_rx.recv_timeout(std::time::Duration::from_millis(750));
             }
-            // Thread exit drains any leftovers; belt-and-suspenders clear.
             if let Ok(mut q) = self.pending_balloons.lock() {
                 q.clear();
             }
@@ -370,7 +366,6 @@ mod windows_impl {
             })
             .ok()?;
 
-        // Brief wait so Drop / show_notification see a ready HWND after startup.
         for _ in 0..50 {
             if hwnd_slot.load(Ordering::SeqCst) != 0 {
                 break;
@@ -403,14 +398,12 @@ mod windows_impl {
             level,
             context_id,
         };
-        // Enqueue first so ownership never depends on PostMessage delivery.
         if let Ok(mut q) = pending.lock() {
             q.push_back(req);
         } else {
             return;
         }
         let hwnd = HWND(raw as *mut core::ffi::c_void);
-        // Wake-up only; if this fails (HWND dying), queue is drained on tray stop.
         let _ = unsafe {
             PostMessageW(
                 Some(hwnd),
@@ -445,7 +438,6 @@ mod windows_impl {
                 lpszClassName: class_name,
                 ..Default::default()
             };
-            // Class may already exist if we restarted the tray in-process.
             let _ = RegisterClassW(&wc);
 
             let icon = load_tray_icon().unwrap_or(HICON(std::ptr::null_mut()));
@@ -474,7 +466,6 @@ mod windows_impl {
                 Ok(h) => h,
                 Err(e) => {
                     drop(Box::from_raw(state_ptr));
-                    // Drop any balloons posted during a failed start (none expected).
                     let _ = drain_pending(&pending_balloons);
                     return Err(format!("CreateWindowEx: {e}"));
                 }
@@ -494,13 +485,11 @@ mod windows_impl {
             write_utf16_buf(&mut nid.szTip, APP_NAME);
 
             if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
-                // HWND is never published, so show_notification cannot race here.
                 let _ = DestroyWindow(hwnd);
                 let _ = drain_pending(&pending_balloons);
                 return Err("Shell_NotifyIcon NIM_ADD failed".into());
             }
 
-            // Version 3 enables NIN_BALLOON* callbacks with the classic lParam packing.
             let ver = NOTIFYICONDATAW {
                 cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                 hWnd: hwnd,
@@ -516,8 +505,6 @@ mod windows_impl {
                 );
             }
 
-            // Publish only when the icon is live and version is attempted, so balloons
-            // must not NIM_MODIFY a non-existent icon.
             hwnd_slot.store(hwnd.0 as isize, Ordering::SeqCst);
 
             let mut msg = MSG::default();
@@ -526,8 +513,6 @@ mod windows_impl {
                 DispatchMessageW(&msg);
             }
 
-            // Stop accepting new work, then free any payloads still queued
-            // (e.g. wake-ups discarded by DestroyWindow).
             hwnd_slot.store(0, Ordering::SeqCst);
             let _ = drain_pending(&pending_balloons);
 
@@ -565,8 +550,6 @@ mod windows_impl {
                     if !ptr.is_null() {
                         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                         let state = Box::from_raw(ptr);
-                        // Drop any balloons still queued; DestroyWindow may discard
-                        // pending WM_SHOW_BALLOON wake-ups without delivering them.
                         let _ = drain_pending(&state.pending_balloons);
                         if !state.icon.0.is_null() {
                             let _ = DestroyIcon(state.icon);
@@ -600,9 +583,6 @@ mod windows_impl {
                                 send_event(hwnd, TrayEvent::BalloonUserClick { context_id });
                             }
                         }
-                        // Clear only on timeout. Do not clear on NIN_BALLOONHIDE:
-                        // replacing a balloon can deliver HIDE for the previous tip
-                        // after the new active context was committed.
                         NIN_BALLOONTIMEOUT => {
                             clear_active_balloon_context(hwnd);
                         }
@@ -654,7 +634,6 @@ mod windows_impl {
             write_utf16_buf(&mut nid.szInfoTitle, &req.title);
             write_utf16_buf(&mut nid.szInfo, &req.body);
             if Shell_NotifyIconW(NIM_MODIFY, &nid).as_bool() {
-                // Commit context only after the balloon is actually shown.
                 state.active_balloon_context_id = Some(req.context_id);
             } else {
                 eprintln!(
@@ -717,7 +696,6 @@ mod windows_impl {
 
             let mut pt = windows::Win32::Foundation::POINT::default();
             let _ = GetCursorPos(&mut pt);
-            // Required so the menu dismisses correctly when clicking elsewhere.
             let _ = SetForegroundWindow(hwnd);
             let _ = TrackPopupMenu(
                 menu,
@@ -840,12 +818,10 @@ mod tests {
 
     #[test]
     fn truncate_respects_multibyte_utf16() {
-        // U+1F600 😀 is two UTF-16 units (surrogate pair).
         let s = "😀😀😀";
         let out = truncate_utf16_units(s, 4);
         assert_eq!(out, "😀😀");
         assert_eq!(out.encode_utf16().count(), 4);
-        // Max 3 units cannot fit a second emoji (2 units).
         let out2 = truncate_utf16_units(s, 3);
         assert_eq!(out2, "😀");
     }
@@ -857,7 +833,6 @@ mod tests {
 
     #[test]
     fn notify_icon_rect_becomes_anchor() {
-        // Shell_NotifyIconGetRect → (left, top, right, bottom) in screen pixels.
         let anchor = anchor_from_notify_rect(1860, 1048, 1884, 1072).expect("valid icon rect");
         assert_eq!(anchor.x, 1860);
         assert_eq!(anchor.y, 1048);

@@ -20,14 +20,13 @@ pub fn try_acquire_single_instance() -> bool {
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
-        // Intentionally leaked: held for process lifetime.
         let result = unsafe { CreateMutexW(None, true, PCWSTR(wide.as_ptr())) };
         match result {
             Ok(_handle) => {
                 let err = unsafe { GetLastError() };
                 err != ERROR_ALREADY_EXISTS
             }
-            Err(_) => true, // if mutex APIs fail, don't block updates
+            Err(_) => true,
         }
     }
     #[cfg(not(windows))]
@@ -56,7 +55,6 @@ pub fn wait_for_process_exit(
         let handle = match handle {
             Ok(h) if !h.is_invalid() => h,
             _ => {
-                // Process already gone (or access denied treated as gone for update purposes).
                 return Ok(());
             }
         };
@@ -71,21 +69,18 @@ pub fn wait_for_process_exit(
                 return Err(WaitError::Timeout);
             }
             let ms = remaining.as_millis().min(u32::MAX as u128) as u32;
-            // Poll in chunks so the UI can keep marquee animation via posted messages.
             let slice = ms.min(250);
             let wait = unsafe { WaitForSingleObject(handle, slice) };
             if wait == WAIT_OBJECT_0 {
                 unsafe {
                     let _ = CloseHandle(handle);
                 }
-                // Brief settle so file handles are fully released before NSIS KillProcess/overwrite.
                 std::thread::sleep(Duration::from_millis(400));
                 return Ok(());
             }
             if wait == WAIT_TIMEOUT {
                 continue;
             }
-            // Unexpected wait result: treat as exited to avoid a stuck updater.
             unsafe {
                 let _ = CloseHandle(handle);
             }

@@ -112,7 +112,6 @@ fn steam_localconfig_vdf_paths(root: &Path) -> Vec<PathBuf> {
         }
     };
 
-    // Single `userdata\{id}` (has config/localconfig.vdf directly).
     collect_user(root, &mut out);
     if !out.is_empty() {
         return out;
@@ -129,13 +128,11 @@ fn steam_localconfig_vdf_paths(root: &Path) -> Vec<PathBuf> {
         }
     };
 
-    // `…\steam\userdata`
     scan_userdata(root, &mut out);
     if !out.is_empty() {
         return out;
     }
 
-    // `…\steam` → userdata\
     let nested = root.join("userdata");
     if nested.is_dir() {
         scan_userdata(&nested, &mut out);
@@ -182,7 +179,6 @@ fn days_from_civil(y: i32, m: u32, d: u32) -> Option<u64> {
     if !(1..=12).contains(&m) || d == 0 || d > 31 {
         return None;
     }
-    // Howard Hinnant civil-from-days; Unix epoch is 1970-01-01.
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
     let yoe = (y - era * 400) as u32;

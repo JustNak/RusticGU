@@ -40,7 +40,6 @@ pub fn resolve_theme_mode(theme: AppTheme, window: Option<&Window>, cx: &App) ->
 pub fn effective_window_opacity_alpha(transparency_pct: u8) -> f32 {
     let t = (transparency_pct.min(MAX_WINDOW_TRANSPARENCY) as f32) / 100.0;
     let floor = (MIN_WINDOW_OPACITY as f32) / 100.0;
-    // alpha = 1 at t=0, floor at t=1
     1.0 - t * (1.0 - floor)
 }
 
@@ -94,7 +93,6 @@ pub fn accent_swatch_color(
         other => {
             let mut probe = Settings::default();
             probe.accent_preset = other;
-            // Probe as dark so swatches stay vivid in the picker regardless of mode.
             resolve_accent_color(&probe, true).unwrap_or(stock_primary)
         }
     }
@@ -197,7 +195,6 @@ fn apply_shape_and_density(theme: &mut Theme, settings: &Settings) {
     theme.radius = px(r);
     theme.radius_lg = px(r_lg);
     theme.font_size = px(settings.ui_density.font_size());
-    // Slightly stronger borders when glassed for readability.
     if settings.window_transparency > 0 {
         theme.border = theme.border.darken(0.08);
         theme.sidebar_border = theme.sidebar_border.darken(0.08);
@@ -273,8 +270,6 @@ pub fn apply_appearance(settings: &Settings, window: Option<&mut Window>, cx: &m
         apply_launcher_surfaces(theme);
         apply_accent(theme, &settings);
         apply_shape_and_density(theme, &settings);
-        // On Windows, layered alpha handles translucency, so keep surfaces solid.
-        // Elsewhere, fade theme surfaces for per-pixel glass.
         #[cfg(not(windows))]
         {
             let effective = effective_window_opacity_alpha(settings.window_transparency);
@@ -382,7 +377,6 @@ pub fn noise_cache_key(intensity: u8) -> u8 {
     if i == 0 {
         return 0;
     }
-    // 5% steps: 1–5 → 5, 6–10 → 10, …, 96–100 → 100
     (((i as u16 + 4) / 5) * 5).min(100) as u8
 }
 
@@ -395,7 +389,6 @@ pub fn noise_cache_key(intensity: u8) -> u8 {
 /// was too heavy).
 fn noise_strength(intensity: u8) -> f32 {
     let t = noise_cache_key(intensity) as f32 / 100.0;
-    // Map full slider range onto the old 0–25% band.
     let former_t = t * 0.25;
     (former_t.powf(0.85) * 0.78).clamp(0.0, 1.0)
 }
@@ -436,7 +429,6 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
         (state & 0xFFFF) as f32 / 65535.0
     };
 
-    // High-frequency field in [-1, 1].
     let mut field = vec![0.0f32; (size * size) as usize];
     for y in 0..size {
         for x in 0..size {
@@ -446,7 +438,6 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
         }
     }
 
-    // Very light cross soften: keeps density, softens pure 1px sparkles.
     let mut soft = vec![0.0f32; field.len()];
     for y in 0..size as i32 {
         for x in 0..size as i32 {
@@ -463,14 +454,11 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
         }
     }
 
-    // Peak fleck alpha at full strength: enough grit, not a fog.
     let max_a = 28.0 + strength * 72.0; // ~28 at tiny, ~100 at full
 
     let mut img = RgbaImage::new(size, size);
     for (i, pixel) in img.pixels_mut().enumerate() {
         let n = soft[i].clamp(-1.0, 1.0);
-        // No large dead-zone: continuous grain (stars came from high thresholds).
-        // pow < 1 boosts mid values so the field looks filled, not dotted.
         let mag = n.abs().powf(0.62);
         let a = (mag * max_a * strength).round().clamp(0.0, 255.0) as u8;
         if a < 2 {
@@ -484,7 +472,6 @@ fn build_film_grain_texture(size: u32, strength: f32) -> RenderImage {
         }
     }
 
-    // RGBA → BGRA for GPUI.
     for px in img.chunks_exact_mut(4) {
         px.swap(0, 2);
     }
@@ -516,7 +503,6 @@ mod tests {
         assert_eq!(s.accent_preset, AccentPreset::Cyan);
         assert_ne!(s.accent_preset, AccentPreset::Orange);
         let c = resolve_accent_color(&s, true).expect("Cyan preset resolves");
-        // Cyan / teal band, not RusticDL orange (~28°).
         assert!(
             c.h > 0.45 && c.h < 0.62,
             "expected cinematic cyan/teal hue, got h={}",
@@ -567,9 +553,7 @@ mod tests {
 
     #[test]
     fn transparency_slider_maps_with_floor() {
-        // 0% = solid (default)
         assert!((effective_window_opacity_alpha(0) - 1.0).abs() < 0.001);
-        // 100% = max glass, still floored
         assert!((effective_window_opacity_alpha(100) - 0.75).abs() < 0.001);
         let mid = effective_window_opacity_alpha(50);
         assert!(mid > 0.75 && mid < 1.0);
@@ -596,7 +580,6 @@ mod tests {
         let s50 = noise_strength(50);
         let s100 = noise_strength(100);
         assert!(s5 < s50 && s50 < s100, "s5={s5} s50={s50} s100={s100}");
-        // 100% is capped at the old ~25% band (not the old full 0.78 peak).
         let old_25 = (0.25f32).powf(0.85) * 0.78;
         assert!((s100 - old_25).abs() < 0.02, "s100={s100} old_25={old_25}");
     }
@@ -620,13 +603,11 @@ mod tests {
 
         let a_low = mean_a(&low);
         let a_high = mean_a(&high);
-        // High intensity must bake stronger alpha than low (opacity path is broken).
         assert!(
             a_high > a_low * 1.8,
             "expected intensity baked into alpha: low={a_low} high={a_high}"
         );
 
-        // Dense field: a large share of pixels carry some fleck (not starfield).
         let bytes = high.as_bytes(0).unwrap();
         let flecks = bytes.chunks_exact(4).filter(|px| px[3] >= 4).count();
         let ratio = flecks as f32 / (bytes.len() / 4) as f32;
@@ -660,7 +641,6 @@ pub fn accent_to_hex(settings: &Settings) -> String {
 }
 
 fn hsla_to_hex(color: Hsla) -> String {
-    // gpui Hsla: h in 0..1 turns, s/l in 0..1
     let h = color.h * 360.0;
     let s = color.s;
     let l = color.l;

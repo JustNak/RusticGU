@@ -50,7 +50,6 @@ fn names_match(title: &str, pattern: &str) -> bool {
     if t.eq_ignore_ascii_case(p) {
         return true;
     }
-    // Short tokens (GW2) are equality-only to avoid false positives.
     if p.chars().count() <= 3 {
         return false;
     }
@@ -74,7 +73,6 @@ fn folder_match(install: Option<&Path>, markers: &[String]) -> bool {
     let Some(path) = install else {
         return false;
     };
-    // Split on both separators so `D:\Games\Guild Wars 2` matches on Linux tests.
     path.to_string_lossy()
         .split(['/', '\\'])
         .filter(|s| !s.is_empty())

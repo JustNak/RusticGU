@@ -65,7 +65,6 @@ pub fn run_update(args: &UpdaterArgs, progress: &dyn ProgressSink) -> UpdateOutc
     progress.set_status("Starting RusticGU…".into());
     progress.set_progress_percent(100);
 
-    // Small delay so the progress text is readable and files settle.
     std::thread::sleep(Duration::from_millis(350));
 
     if let Err(e) = relaunch_app(&args.app_exe) {

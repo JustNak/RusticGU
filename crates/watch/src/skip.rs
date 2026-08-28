@@ -16,7 +16,6 @@ use std::path::Path;
 
 /// Already-compressed / not-worth-WOF extensions (no leading dot).
 pub const SKIP_EXTENSIONS: &[&str] = &[
-    // video
     "bik",
     "bk2",
     "bik2",
@@ -33,7 +32,6 @@ pub const SKIP_EXTENSIONS: &[&str] = &[
     "vob",
     "usm",
     "ivf",
-    // audio
     "mp3",
     "ogg",
     "wma",
@@ -44,7 +42,6 @@ pub const SKIP_EXTENSIONS: &[&str] = &[
     "wem",
     "fsb",
     "xwma",
-    // textures / images
     "jpg",
     "jpeg",
     "png",
@@ -57,7 +54,6 @@ pub const SKIP_EXTENSIONS: &[&str] = &[
     "pvr",
     "crn",
     "tfc",
-    // archives
     "zip",
     "7z",
     "rar",
@@ -75,7 +71,6 @@ pub const SKIP_EXTENSIONS: &[&str] = &[
     "lzma",
     "zst",
     "zstd",
-    // junk
     "log",
     "dmp",
     "tmp",
@@ -131,7 +126,6 @@ fn extension_of(path: &Path) -> Option<String> {
         .file_name()
         .or_else(|| path.components().last().map(|c| c.as_os_str()))
         .and_then(|n| n.to_str())?;
-    // Handle `D:\foo\bar.mp4` on Linux (whole path is one component).
     let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let ext = name.rsplit_once('.')?.1;
     if ext.is_empty() {

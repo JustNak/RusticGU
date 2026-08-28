@@ -100,7 +100,6 @@ impl LibraryApp {
         });
         if self.toasts.len() > TOAST_MAX_STACK {
             let overflow = self.toasts.len() - TOAST_MAX_STACK;
-            // Drop oldest; keep update_toast_id coherent if it was drained.
             let drained: Vec<u64> = self.toasts.drain(0..overflow).map(|t| t.id).collect();
             if let Some(uid) = self.update_toast_id {
                 if drained.contains(&uid) {
@@ -109,7 +108,6 @@ impl LibraryApp {
             }
         }
 
-        // Action toasts stay until dismissed or the action is taken.
         if !has_action {
             cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(TOAST_AUTO_HIDE).await;

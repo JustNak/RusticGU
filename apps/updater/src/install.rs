@@ -31,8 +31,6 @@ pub fn run_silent_installer(path: &Path, progress: &dyn ProgressSink) -> Result<
         {
             Ok(status) => status,
             Err(e) if e.raw_os_error() == Some(ERROR_ELEVATION_REQUIRED) => {
-                // Per-machine setups (or Installer Detection) need elevation.
-                // ShellExecuteEx with "runas" shows UAC and can wait for exit.
                 return run_installer_elevated(path, progress);
             }
             Err(e) => return Err(format!("Could not start installer: {e}")),
@@ -207,7 +205,6 @@ Accept the Windows security prompt, or install the update manually from the rele
 /// Launch the main application after a successful update.
 pub fn relaunch_app(app_exe: &Path) -> Result<(), String> {
     if !app_exe.is_file() {
-        // Fresh install path might still be settling; brief retry.
         for _ in 0..10 {
             std::thread::sleep(Duration::from_millis(200));
             if app_exe.is_file() {

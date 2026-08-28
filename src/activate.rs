@@ -107,7 +107,6 @@ mod windows_impl {
         }
         let connected = unsafe { ConnectNamedPipe(handle, None) };
         if connected.is_err() {
-            // ERROR_PIPE_CONNECTED (535) is success when a client is already waiting.
             let err = std::io::Error::last_os_error();
             if err.raw_os_error() != Some(535) {
                 return Err(err);

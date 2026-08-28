@@ -339,7 +339,6 @@ mod tests {
         assert!(is_wof_exe_command(&inv));
         assert!(!is_lznt1_command(&inv));
         assert!(!line.contains("LZNT1"));
-        // `/EXE` must be present so compact.exe does not fall back to LZNT1.
         assert!(inv
             .args
             .iter()

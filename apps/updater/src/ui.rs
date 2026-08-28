@@ -158,7 +158,6 @@ mod windows_ui {
         let (tx, rx) = mpsc::channel::<T>();
         let sink_shared = Arc::clone(&shared);
         thread::spawn(move || {
-            // Give the UI thread a moment to create the window.
             thread::sleep(std::time::Duration::from_millis(80));
             let sink = UiSink { state: sink_shared };
             let result = work(&sink);
@@ -227,15 +226,12 @@ mod windows_ui {
         let width = 420;
         let height = 160;
 
-        // Pass Arc via boxed raw pointer for WM_CREATE.
         let create_param = Box::into_raw(Box::new(shared.clone()));
 
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             class_name,
             PCWSTR(title_w.as_ptr()),
-            // Create hidden, center on the work area, then ShowWindow so the
-            // first painted frame is already centered (avoids CW_USEDEFAULT flash).
             WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -250,8 +246,6 @@ mod windows_ui {
 
         shared.hwnd.store(hwnd.0 as isize, Ordering::SeqCst);
 
-        // CW_USEDEFAULT places the window at a cascade corner; center on the
-        // work area of the monitor under the cursor (or the host/primary).
         center_window_on_work_area(hwnd);
 
         let _ = ShowWindow(hwnd, SW_SHOW);
@@ -326,7 +320,6 @@ mod windows_ui {
                     );
                 }
 
-                // range 0..100 packed in LPARAM: low = min, high = max
                 let _ = SendMessageW(
                     bar,
                     PBM_SETRANGE,
@@ -390,10 +383,7 @@ mod windows_ui {
                 let _ = DestroyWindow(hwnd);
                 LRESULT(0)
             }
-            WM_CLOSE => {
-                // Ignore close while updating (prevents abort mid-install).
-                LRESULT(0)
-            }
+            WM_CLOSE => LRESULT(0),
             WM_DESTROY => {
                 let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
                 if ptr != 0 {
