@@ -19,7 +19,6 @@ pub(crate) fn render_vignette_overlay(edge_alpha: f32, is_dark: bool) -> impl In
         .absolute()
         .inset_0()
         .size_full()
-        // Top
         .child(
             div()
                 .absolute()
@@ -33,7 +32,6 @@ pub(crate) fn render_vignette_overlay(edge_alpha: f32, is_dark: bool) -> impl In
                     linear_color_stop(clear, 1.0),
                 )),
         )
-        // Bottom
         .child(
             div()
                 .absolute()
@@ -47,7 +45,6 @@ pub(crate) fn render_vignette_overlay(edge_alpha: f32, is_dark: bool) -> impl In
                     linear_color_stop(clear, 1.0),
                 )),
         )
-        // Left
         .child(
             div()
                 .absolute()
@@ -61,7 +58,6 @@ pub(crate) fn render_vignette_overlay(edge_alpha: f32, is_dark: bool) -> impl In
                     linear_color_stop(clear, 1.0),
                 )),
         )
-        // Right
         .child(
             div()
                 .absolute()

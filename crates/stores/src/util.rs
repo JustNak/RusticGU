@@ -66,9 +66,7 @@ pub fn parse_simple_yaml_map(text: &str) -> Vec<(String, String)> {
             continue;
         };
         let key = k.trim();
-        if key.is_empty() || key.contains(' ') && !key.contains('_') {
-            // skip likely non-scalar keys; still allow product_install_full_path
-        }
+        if key.is_empty() || key.contains(' ') && !key.contains('_') {}
         let mut val = v.trim().to_string();
         if (val.starts_with('"') && val.ends_with('"') && val.len() >= 2)
             || (val.starts_with('\'') && val.ends_with('\'') && val.len() >= 2)
@@ -138,7 +136,6 @@ pub fn looks_like_volume_root(path: &Path) -> bool {
     }
     let s = path.to_string_lossy();
     let trimmed = s.trim_end_matches(['\\', '/']);
-    // `D:` or `D:\`
     let bytes = trimmed.as_bytes();
     bytes.len() == 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
 }

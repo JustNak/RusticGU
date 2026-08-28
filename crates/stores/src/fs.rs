@@ -132,7 +132,6 @@ impl MemoryFs {
     pub fn add_dir(&mut self, path: impl AsRef<Path>) {
         let key = normalize_path_key(path.as_ref());
         self.dirs.insert(key.clone(), ());
-        // ensure ancestors exist
         let mut acc = String::new();
         for part in key.split('/') {
             if part.is_empty() {

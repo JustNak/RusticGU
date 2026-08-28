@@ -268,7 +268,6 @@ pub fn os_supports_wof() -> bool {
     }
     #[cfg(not(windows))]
     {
-        // Unit tests / Linux CI: treat as supported so command construction can be tested.
         true
     }
 }
@@ -276,7 +275,6 @@ pub fn os_supports_wof() -> bool {
 #[cfg(windows)]
 fn windows_build_number() -> Option<u32> {
     use windows::Win32::System::SystemInformation::OSVERSIONINFOW;
-    // RtlGetVersion is the supported way after GetVersionEx was deprecated.
     #[link(name = "ntdll")]
     extern "system" {
         fn RtlGetVersion(info: *mut OSVERSIONINFOW) -> i32;

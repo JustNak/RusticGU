@@ -309,8 +309,6 @@ pub fn game_from_acf(text: &str, library_path: &Path) -> Option<SteamGame> {
 
 fn fill_cheap_sizes(game: &mut SteamGame) {
     let (cheap_logical, cheap_on_disk) = cheap_install_sizes(&game.install_path);
-    // Compacted status must compare the same file set. Steam `SizeOnDisk` is the
-    // full tree; a shallow/sampled listing is not a comparable on-disk total.
     game.compacted = sizes_indicate_compacted(cheap_on_disk, cheap_logical);
     if game.logical_bytes.is_none() {
         game.logical_bytes = cheap_logical;
@@ -809,8 +807,6 @@ mod tests {
         assert!(!sizes_indicate_compacted(Some(126_000_000), None));
         assert!(!sizes_indicate_compacted(Some(0), Some(0)));
         assert!(!sizes_indicate_compacted(Some(1), Some(0)));
-        // This pairing is what the old sidebar used (SizeOnDisk vs one root file).
-        // The heuristic itself is true — fill_cheap_sizes must refuse to feed it.
         assert!(sizes_indicate_compacted(Some(4_096), Some(40_000_000_000)));
     }
 

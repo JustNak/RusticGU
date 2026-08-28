@@ -44,7 +44,6 @@ fn gog_and_ubi_hive() -> MemoryHive {
         "gameID",
         "1207659012",
     );
-    // Same game mirrored in the non-WOW hive must not duplicate within GOG.
     hive.set_value(
         r"SOFTWARE\GOG.com\Games\1207659012",
         "path",

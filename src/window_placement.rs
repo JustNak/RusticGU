@@ -99,7 +99,6 @@ pub fn cascade_hwnd(hwnd: windows::Win32::Foundation::HWND, index: usize) {
             return;
         }
 
-        // `rcWork` excludes the taskbar / docked bars, which is better than full `rcMonitor`.
         let work = info.rcWork;
         let (x, y) = cascade_origin(
             work.left,
@@ -412,8 +411,6 @@ fn place_flyout_hwnd(
             return;
         }
 
-        // gpui 0.2.2 PopUp windows are created with WINDOW_STYLE(0). Force a
-        // caption-free popup so this is a panel, not a titled tool window.
         let style = (WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS).0 as i32
             & !((WS_CAPTION | WS_THICKFRAME).0 as i32);
         SetWindowLongW(hwnd, GWL_STYLE, style);
@@ -570,7 +567,6 @@ mod tests {
 
     #[test]
     fn flyout_sits_above_taskbar_icon_with_clearance() {
-        // 1920×1080, 40px taskbar → rcWork bottom = 1040. Icon lives in the taskbar.
         let monitor = (0, 0, 1920, 1080);
         let work = (0, 0, 1920, 1040);
         let icon = (1860, 1048, 24, 24);
@@ -597,7 +593,6 @@ mod tests {
 
     #[test]
     fn flyout_clears_tall_taskbar() {
-        // 72px taskbar (large / tablet). Old first-display y = 1080-320 sits in the bar.
         let monitor = (0, 0, 1920, 1080);
         let work = (0, 0, 1920, 1008);
         let icon = (1860, 1020, 24, 24);
@@ -625,7 +620,6 @@ mod tests {
 
     #[test]
     fn flyout_clears_autohide_taskbar_using_icon() {
-        // Auto-hide: rcWork == rcMonitor. Sit above the icon and reserve a typical bar.
         let screen = (0, 0, 1920, 1080);
         let icon = (1860, 1048, 24, 24);
         let (x, y) = flyout_origin_above_icon(
@@ -689,7 +683,6 @@ mod tests {
 
     #[test]
     fn flyout_is_not_hardcoded_display_corner() {
-        // QA FAIL #2: b9133c8 used first-display (width-348, height-320).
         let monitor = (0, 0, 1920, 1080);
         let work = (0, 0, 1920, 1040);
         let icon = crate::tray::anchor_from_notify_rect(1860, 1048, 1884, 1072).unwrap();

@@ -70,9 +70,6 @@ fn main() {
         {
             let release = args.release_page.as_deref();
             ui::show_error_message("RusticGU Updater", &message, release);
-            // Best-effort: leave the user with a running app when the main
-            // process already exited for the update. Skip WaitTimeout: the
-            // original app is still alive in that case.
             if matches!(
                 outcome,
                 UpdateOutcome::DownloadFailed(_)

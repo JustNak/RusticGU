@@ -86,7 +86,6 @@ fn parse_mfst(fs: &impl IndexFs, path: &Path) -> StoreResult<Option<DiscoveredTi
     let Some(install) = install.filter(|s| !s.is_empty()) else {
         return Ok(None);
     };
-    // Steam-bridged Origin titles end with @steam, but they are still a valid EA index entry.
     let id = query_value(&pairs, "id").map(str::to_string);
     let title = query_value(&pairs, "displayName")
         .or_else(|| query_value(&pairs, "displayNameLoc"))

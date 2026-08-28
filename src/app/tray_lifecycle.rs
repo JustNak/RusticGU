@@ -148,7 +148,6 @@ impl LibraryApp {
             show_main_window(window);
         }
         if self.pending_toggle_flyout {
-            // Legacy flag: opening a window from Render is the empty-flyout bug.
             self.pending_toggle_flyout = false;
         }
         if self.pending_open_compact {

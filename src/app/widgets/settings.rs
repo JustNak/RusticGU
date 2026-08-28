@@ -35,8 +35,6 @@ pub(crate) fn field_hint(text: impl Into<SharedString>, cx: &mut App) -> impl In
         .child(text.into())
 }
 
-// ── Settings layout helpers (settings panels only; leave add-dialog labels alone) ──
-
 /// Settings field label: `text_sm` semibold so hierarchy beats muted hints.
 pub(crate) fn settings_field_label(text: &'static str, cx: &mut App) -> impl IntoElement {
     let theme = cx.theme().clone();
@@ -82,7 +80,6 @@ pub(crate) fn settings_input_with_reset(
                             input_entity.update(cx, |state, cx| {
                                 state.set_value(default_owned.clone(), window, cx);
                             });
-                            // Re-render settings so the suffix can hide when clean.
                             let _ = app.update(cx, |_, cx| cx.notify());
                         }
                     }),
@@ -137,8 +134,6 @@ pub(crate) fn settings_choice_row(
                 .child(settings_field_label(label, cx))
                 .when_some(hint, |el, text| el.child(field_hint(text, cx))),
         )
-        // Size to the control cluster; do not cap width so Off/On/Auto groups
-        // stay on one line inside the expanded settings content column.
         .child(div().flex_shrink_0().child(control))
 }
 
@@ -156,8 +151,6 @@ pub(crate) fn accent_preset_swatch(
     } else {
         label.to_string().into()
     };
-    // Light fills (stock dark primary is often near-white) need a stronger edge
-    // so they don't dissolve into the selection ring or the panel.
     let light_fill = swatch.l > 0.72;
     let fill_border = if selected {
         if light_fill {
@@ -180,7 +173,6 @@ pub(crate) fn accent_preset_swatch(
         .cursor_pointer()
         .border_2()
         .border_color(if selected {
-            // Darker ring when the fill itself is light so selection stays obvious.
             if light_fill {
                 theme.muted_foreground.opacity(0.95)
             } else {
@@ -217,7 +209,6 @@ pub(crate) fn accent_custom_swatch(
     cx: &mut Context<LibraryApp>,
 ) -> impl IntoElement {
     let tip: SharedString = "Custom: mix your own accent".into();
-    // White plate always; brush in dark ink so it stays readable on light/dark UI.
     let plate = hsla(0.0, 0.0, 0.98, 1.0);
     let brush = hsla(0.0, 0.0, 0.22, 1.0);
 

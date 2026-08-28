@@ -135,7 +135,6 @@ fn split_hive(key: &str) -> StoreResult<(winreg::RegKey, String)> {
         .strip_prefix("hklm\\")
         .or_else(|| lower.strip_prefix("hkey_local_machine\\"))
     {
-        // Preserve original casing of the remainder from `key`.
         let orig = key
             .split_once('\\')
             .map(|(_, r)| r.to_string())

@@ -72,7 +72,6 @@ impl<'a> Parser<'a> {
                     children: BTreeMap::new(),
                 };
                 root.children.insert(name, child);
-                // trailing siblings at root
                 self.skip_ws();
                 while self.peek() == Some('"') {
                     let k = self.parse_string()?;

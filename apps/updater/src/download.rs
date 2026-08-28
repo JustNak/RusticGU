@@ -81,7 +81,6 @@ pub fn download_installer(
     if let Some(total) = expected_size {
         if let Ok(meta) = std::fs::metadata(&installer_path) {
             if meta.len() != total {
-                // Soft warning only: GitHub size can differ if CDN recompresses (rare).
                 progress.set_status(format!(
                     "Downloaded {} (expected {})",
                     format_bytes(meta.len()),

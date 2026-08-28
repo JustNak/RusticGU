@@ -40,7 +40,6 @@ impl LibraryApp {
         let accent_light = self.settings.accent_lightness;
         let custom_color = custom_accent_hsla(accent_hue, accent_sat, accent_light);
         let resolved_mode = resolve_theme_mode(theme_choice, None, cx);
-        // Sparse hints: only System needs a live mode note; Light/Dark covered by footer line.
         let mode_hint = match theme_choice {
             AppTheme::System => {
                 if resolved_mode.is_dark() {
@@ -57,7 +56,6 @@ impl LibraryApp {
             .child(
                 v_flex()
                     .gap_3()
-                    // ── Theme & color ──
                     .child(settings_subgroup("Theme & color", false, cx))
                     .child(settings_choice_row(
                         "Theme",
@@ -99,7 +97,6 @@ impl LibraryApp {
                             ),
                         cx,
                     ))
-                    // Accent: preset dots + distinct Custom (rainbow ring)
                     .child(
                         v_flex()
                             .gap_2()
@@ -138,7 +135,6 @@ impl LibraryApp {
                                             cx,
                                         )
                                     }))
-                                    // Divider: presets | custom mixer
                                     .child(
                                         div()
                                             .mx_0p5()
@@ -222,7 +218,6 @@ impl LibraryApp {
                                 )
                             }),
                     )
-                    // Live preview strip: near theme/accent so color changes are obvious
                     .child(
                         v_flex()
                             .gap_2()
@@ -265,7 +260,6 @@ impl LibraryApp {
                                     ),
                             ),
                     )
-                    // ── Glass & texture ──
                     .child(settings_subgroup("Glass & texture", true, cx))
                     .child(
                         v_flex()
@@ -282,8 +276,6 @@ impl LibraryApp {
                                     ),
                             )
                             .child(Slider::new(&self.opacity_slider).horizontal().w_full())
-                            // One glass-interaction note for the whole sub-group
-                            // (blur constraint kept here so Backdrop blur can stay hint-free).
                             .child(field_hint(
                                 "0% solid. Higher values glass the window; blur softens the backdrop when transparent.",
                                 cx,
@@ -346,7 +338,6 @@ impl LibraryApp {
                             )
                             .child(Slider::new(&self.vignette_slider).horizontal().w_full()),
                     )
-                    // ── Layout & motion ──
                     .child(settings_subgroup("Layout & motion", true, cx))
                     .child(settings_choice_row(
                         "UI density",
@@ -410,7 +401,6 @@ impl LibraryApp {
                             ),
                         cx,
                     ))
-                    // ── Progress ──
                     .child(settings_subgroup("Progress", true, cx))
                     .child(settings_choice_row(
                         "Progress style",
@@ -431,7 +421,6 @@ impl LibraryApp {
                         })),
                         cx,
                     ))
-                    // Section-local reset (kept one-click; draft-only until Save)
                     .child(
                         h_flex().child(
                             Button::new("reset-appearance")
