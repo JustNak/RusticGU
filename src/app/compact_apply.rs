@@ -148,7 +148,7 @@ impl TitleActivity {
 
     pub(crate) fn percent(&self) -> Option<f32> {
         let Self::Job {
-            kind,
+            kind: _,
             waiting,
             progress,
         } = self
@@ -159,9 +159,6 @@ impl TitleActivity {
             return Some(0.0);
         }
         let pct = (progress.processed as f32 / progress.total as f32) * 100.0;
-        if matches!(kind, PosterJobKind::Decompress) && progress.processed == 0 {
-            return Some(28.0);
-        }
         Some(pct.clamp(0.0, 100.0))
     }
 
@@ -532,7 +529,7 @@ mod tests {
             current_id: title.id.clone(),
             kind: PosterJobKind::Decompress,
             progress: CompactProgress {
-                processed: 0,
+                processed: 40,
                 total: 400,
                 message: "Starting WOF uncompact…".into(),
             },

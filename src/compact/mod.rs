@@ -2,11 +2,17 @@
 //!
 //! Never uses NTFS LZNT1 (`compact` without `/EXE`). Undo is `/U /EXE` only.
 
+mod apply;
 mod command;
 mod engine;
+mod exe;
+mod job;
 mod level;
 mod skip;
+pub(crate) mod wof;
 
+#[allow(unused_imports)]
+pub use apply::maybe_run_wof_job_cli;
 #[allow(unused_imports)]
 pub use command::{
     apply_target_paths, build_apply_invocations, build_apply_invocations_with,

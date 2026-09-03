@@ -6,11 +6,8 @@ use crate::settings::CompactAlgorithm;
 
 use crate::library::steam_updating_app_id;
 
-use super::command::{
-    build_apply_invocations_with_force, build_incremental_invocations,
-    build_wof_files_command_with, invocation_target_files, CompactInvocation, CompactOp,
-};
-use super::skip::{auto_excluded_title, collect_included_files, tree_contains_dstorage};
+use super::command::CompactOp;
+use super::skip::{auto_excluded_title, collect_inventory, tree_contains_dstorage};
 
 /// Typical XPRESS8K ratio used for dry-run estimates (conservative).
 const XPRESS8K_RATIO: f64 = 0.62;
@@ -133,24 +130,15 @@ pub fn estimate_compact_with(
     if !root.is_dir() {
         return Err("Game folder is missing.".into());
     }
-    let walked = super::skip::walkdir_limited(root, super::skip::COMPACT_WALK_DEPTH);
-    let included = collect_included_files(root);
-    let file_count = included.len();
-    let skipped_count = walked.len().saturating_sub(file_count);
-    let mut logical_bytes = 0u64;
-    for path in &included {
-        if let Ok(meta) = std::fs::metadata(path) {
-            logical_bytes = logical_bytes.saturating_add(meta.len());
-        }
-    }
+    let inv = collect_inventory(root);
     let ratio = estimate_ratio(algorithm);
-    let estimated_on_disk_bytes = (logical_bytes as f64 * ratio).round() as u64;
+    let estimated_on_disk_bytes = (inv.logical_bytes as f64 * ratio).round() as u64;
     Ok(CompactEstimate {
-        file_count,
-        skipped_count,
-        logical_bytes,
+        file_count: inv.included.len(),
+        skipped_count: inv.skipped_count(),
+        logical_bytes: inv.logical_bytes,
         estimated_on_disk_bytes,
-        has_dstorage: tree_contains_dstorage(root),
+        has_dstorage: inv.has_dstorage,
     })
 }
 
@@ -166,25 +154,17 @@ pub(crate) fn estimate_ratio(algorithm: CompactAlgorithm) -> f64 {
 
 /// Walk compactable files and sum logical + on-disk bytes (same skip list as apply).
 pub fn measure_compact_sizes(root: &Path) -> CompactSizeSnapshot {
-    let included = collect_included_files(root);
-    let mut logical_bytes = 0u64;
+    let inv = collect_inventory(root);
     let mut on_disk_bytes = 0u64;
-    for path in &included {
-        let Ok(meta) = std::fs::metadata(path) else {
-            continue;
-        };
-        if !meta.is_file() {
-            continue;
-        }
-        let logical = meta.len();
+    for path in &inv.included {
+        let logical = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let on_disk = file_on_disk_bytes(path).unwrap_or(logical);
-        logical_bytes = logical_bytes.saturating_add(logical);
         on_disk_bytes = on_disk_bytes.saturating_add(on_disk);
     }
     CompactSizeSnapshot {
-        logical_bytes,
+        logical_bytes: inv.logical_bytes,
         on_disk_bytes,
-        file_count: included.len(),
+        file_count: inv.included.len(),
     }
 }
 
@@ -411,9 +391,9 @@ pub fn apply_compact(
     root: &Path,
     algorithm: CompactAlgorithm,
     allow_dstorage: bool,
-    progress: impl FnMut(CompactProgress),
+    progress: impl FnMut(CompactProgress) + Send,
 ) -> Result<CompactResult, String> {
-    apply_wof(
+    super::apply::apply_wof(
         op,
         root,
         algorithm.for_live_library(),
@@ -430,9 +410,9 @@ pub fn apply_compact_allowing_lzx(
     root: &Path,
     algorithm: CompactAlgorithm,
     allow_dstorage: bool,
-    progress: impl FnMut(CompactProgress),
+    progress: impl FnMut(CompactProgress) + Send,
 ) -> Result<CompactResult, String> {
-    apply_wof(op, root, algorithm, allow_dstorage, None, false, progress)
+    super::apply::apply_wof(op, root, algorithm, allow_dstorage, None, false, progress)
 }
 
 /// User-initiated Change-method: rewrite already-compressed files (`/F`).
@@ -443,9 +423,9 @@ pub fn apply_compact_force(
     root: &Path,
     algorithm: CompactAlgorithm,
     allow_dstorage: bool,
-    progress: impl FnMut(CompactProgress),
+    progress: impl FnMut(CompactProgress) + Send,
 ) -> Result<CompactResult, String> {
-    apply_wof(op, root, algorithm, allow_dstorage, None, true, progress)
+    super::apply::apply_wof(op, root, algorithm, allow_dstorage, None, true, progress)
 }
 
 /// Incremental recompact of named files. Live algorithm only; never `/F` or root `/S`.
@@ -454,9 +434,9 @@ pub fn apply_incremental(
     files: &[PathBuf],
     algorithm: CompactAlgorithm,
     allow_dstorage: bool,
-    progress: impl FnMut(CompactProgress),
+    progress: impl FnMut(CompactProgress) + Send,
 ) -> Result<CompactResult, String> {
-    apply_wof(
+    super::apply::apply_wof(
         CompactOp::Compress,
         root,
         algorithm.for_live_library(),
@@ -467,382 +447,12 @@ pub fn apply_incremental(
     )
 }
 
-fn apply_wof(
-    op: CompactOp,
-    root: &Path,
-    algorithm: CompactAlgorithm,
-    allow_dstorage: bool,
-    explicit_files: Option<&[PathBuf]>,
-    force: bool,
-    mut progress: impl FnMut(CompactProgress),
-) -> Result<CompactResult, String> {
-    preflight(root, allow_dstorage).map_err(|e| e.to_string())?;
-    let estimate = if explicit_files.is_some() {
-        CompactEstimate {
-            file_count: explicit_files.map(|f| f.len()).unwrap_or(1).max(1),
-            skipped_count: 0,
-            logical_bytes: 0,
-            estimated_on_disk_bytes: 0,
-            has_dstorage: super::skip::tree_contains_dstorage(root),
-        }
-    } else {
-        estimate_compact_with(root, algorithm)?
-    };
-    progress(CompactProgress {
-        processed: 0,
-        total: estimate.file_count.max(1),
-        message: if force {
-            "Changing compression…".into()
-        } else {
-            match op {
-                CompactOp::Compress => "Starting WOF compact…".into(),
-                CompactOp::Uncompress => "Starting WOF uncompact…".into(),
-            }
-        },
-    });
-
-    let invocations = match explicit_files {
-        Some(files) => build_incremental_invocations(root, files, algorithm),
-        None => {
-            let coerce_live = algorithm.is_live();
-            build_apply_invocations_with_force(op, root, algorithm, coerce_live, force)
-        }
-    };
-    if invocations.is_empty() {
-        return Ok(CompactResult {
-            ok: true,
-            message: "Nothing to compact (skip list excluded every file).".into(),
-        });
-    }
-
-    let total = estimate.file_count.max(1);
-    let mut elevate = false;
-    let mut processed = 0usize;
-    let mut last_output = CommandOutput {
-        status_ok: true,
-        stdout: String::new(),
-        stderr: String::new(),
-        code: Some(0),
-    };
-    let mut last_err: Option<String> = None;
-    let mut any_ok = false;
-
-    for inv in &invocations {
-        let file_n = invocation_target_files(inv).len().max(1);
-        progress(CompactProgress {
-            processed: processed.min(total),
-            total,
-            message: format!("WOF /EXE {processed}/{total}…"),
-        });
-        let mut run = CompactRun {
-            op,
-            algorithm,
-            force,
-            elevate: &mut elevate,
-            processed,
-            total,
-        };
-        match run_compact_resilient(&mut run, inv, &mut progress) {
-            Ok(output) => {
-                any_ok = true;
-                last_output = output;
-            }
-            Err(err) => {
-                last_err = Some(err);
-            }
-        }
-        processed = processed.saturating_add(file_n);
-        progress(CompactProgress {
-            processed: processed.min(total),
-            total,
-            message: format!("WOF /EXE {processed}/{total}…"),
-        });
-    }
-
-    progress(CompactProgress {
-        processed: total,
-        total,
-        message: "Finished.".into(),
-    });
-    if let Some(err) = last_err {
-        if !any_ok {
-            return Err(err);
-        }
-    }
-    interpret_output(op, last_output)
-}
-
-struct CommandOutput {
-    status_ok: bool,
-    stdout: String,
-    stderr: String,
-    code: Option<i32>,
-}
-
-fn is_access_denied(output: &CommandOutput) -> bool {
-    let blob = format!("{}\n{}", output.stdout, output.stderr).to_ascii_lowercase();
-    output.code == Some(5) || blob.contains("access is denied") || blob.contains("access denied")
-}
-
-fn interpret_output(op: CompactOp, output: CommandOutput) -> Result<CompactResult, String> {
-    if output.status_ok {
-        let verb = match op {
-            CompactOp::Compress => "Compacted",
-            CompactOp::Uncompress => "Uncompacted",
-        };
-        Ok(CompactResult {
-            ok: true,
-            message: format!("{verb} with WOF /EXE."),
-        })
-    } else {
-        Err(output_error(&output))
-    }
-}
-
-fn output_error(output: &CommandOutput) -> String {
-    let detail = if output.stderr.trim().is_empty() {
-        output.stdout.trim().to_string()
-    } else {
-        output.stderr.trim().to_string()
-    };
-    if detail.is_empty() {
-        format!("compact.exe failed (exit {}).", output.code.unwrap_or(-1))
-    } else {
-        detail
-    }
-}
-
-fn is_cmdline_too_long(err: &str) -> bool {
-    let e = err.to_ascii_lowercase();
-    e.contains("too long") || e.contains("os error 206")
-}
-
-struct CompactRun<'a> {
-    op: CompactOp,
-    algorithm: CompactAlgorithm,
-    force: bool,
-    elevate: &'a mut bool,
-    processed: usize,
-    total: usize,
-}
-
-fn run_compact_access(
-    run: &mut CompactRun<'_>,
-    inv: &CompactInvocation,
-    progress: &mut impl FnMut(CompactProgress),
-) -> Result<CommandOutput, String> {
-    let mut output = run_compact(inv, *run.elevate)?;
-    if is_access_denied(&output) && !*run.elevate {
-        progress(CompactProgress {
-            processed: run.processed,
-            total: run.total,
-            message: "Access denied. Retrying elevated…".into(),
-        });
-        *run.elevate = true;
-        output = run_compact(inv, true)?;
-    }
-    Ok(output)
-}
-
-/// Run one invocation. If the batch fails, retry files one-by-one. Maximum / LZX
-/// file failures fall back to XPRESS16K so one incompressible Unity bundle
-/// cannot abort the whole title.
-fn run_compact_resilient(
-    run: &mut CompactRun<'_>,
-    inv: &CompactInvocation,
-    progress: &mut impl FnMut(CompactProgress),
-) -> Result<CommandOutput, String> {
-    match run_compact_access(run, inv, progress) {
-        Ok(out) if out.status_ok => Ok(out),
-        Ok(out) => recover_failed_invocation(run, inv, progress, out),
-        Err(err) if is_cmdline_too_long(&err) => recover_failed_invocation(
-            run,
-            inv,
-            progress,
-            CommandOutput {
-                status_ok: false,
-                stdout: String::new(),
-                stderr: err,
-                code: Some(206),
-            },
-        ),
-        Err(err) => Err(err),
-    }
-}
-
-fn recover_failed_invocation(
-    run: &mut CompactRun<'_>,
-    inv: &CompactInvocation,
-    progress: &mut impl FnMut(CompactProgress),
-    failed: CommandOutput,
-) -> Result<CommandOutput, String> {
-    let files = invocation_target_files(inv);
-    if files.len() > 1 {
-        let mut last_ok = None;
-        let mut last_err = None;
-        for file in files {
-            let single = build_wof_files_command_with(
-                run.op,
-                std::slice::from_ref(&file),
-                run.algorithm,
-                run.force,
-            );
-            match run_compact_resilient(run, &single, progress) {
-                Ok(out) => last_ok = Some(out),
-                Err(err) => last_err = Some(err),
-            }
-        }
-        if let Some(out) = last_ok {
-            return Ok(out);
-        }
-        return Err(last_err.unwrap_or_else(|| output_error(&failed)));
-    }
-    if run.op == CompactOp::Compress && run.algorithm == CompactAlgorithm::Lzx && !files.is_empty()
-    {
-        let fallback =
-            build_wof_files_command_with(run.op, &files, CompactAlgorithm::Xpress16k, run.force);
-        match run_compact_access(run, &fallback, progress) {
-            Ok(out) if out.status_ok => return Ok(out),
-            Ok(out) => return Err(output_error(&out)),
-            Err(err) => return Err(err),
-        }
-    }
-    Err(output_error(&failed))
-}
-
-#[cfg(test)]
-thread_local! {
-    static COMPACT_SPAWN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-fn test_lzx_fail_marker(inv: &CompactInvocation) -> bool {
-    let line = inv.display_cmdline().to_ascii_lowercase();
-    line.contains("rusticgu-lzx-fail") && line.contains("/exe:lzx")
-}
-
-fn run_compact(
-    inv: &super::command::CompactInvocation,
-    elevate: bool,
-) -> Result<CommandOutput, String> {
-    #[cfg(test)]
-    {
-        COMPACT_SPAWN_COUNT.with(|c| c.set(c.get().saturating_add(1)));
-        if test_lzx_fail_marker(inv) {
-            return Ok(CommandOutput {
-                status_ok: false,
-                stdout: String::new(),
-                stderr: "simulated LZX failure".into(),
-                code: Some(1),
-            });
-        }
-    }
-    #[cfg(windows)]
-    {
-        windows_run(inv, elevate)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = elevate;
-        Ok(CommandOutput {
-            status_ok: true,
-            stdout: format!("dry {}", inv.display_cmdline()),
-            stderr: String::new(),
-            code: Some(0),
-        })
-    }
-}
-
-#[cfg(windows)]
-fn windows_run(
-    inv: &super::command::CompactInvocation,
-    elevate: bool,
-) -> Result<CommandOutput, String> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
-
-    if elevate {
-        return windows_run_elevated(inv);
-    }
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let output = Command::new(&inv.program)
-        .args(&inv.args)
-        .creation_flags(CREATE_NO_WINDOW)
-        .output()
-        .map_err(|e| format!("Could not start compact.exe: {e}"))?;
-    Ok(CommandOutput {
-        status_ok: output.status.success(),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        code: output.status.code(),
-    })
-}
-
-#[cfg(windows)]
-fn windows_run_elevated(inv: &super::command::CompactInvocation) -> Result<CommandOutput, String> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows::core::PCWSTR;
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::WaitForSingleObject;
-    use windows::Win32::UI::Shell::{
-        ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
-
-    fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
-        s.encode_wide().chain(std::iter::once(0)).collect()
-    }
-
-    let file = wide(std::ffi::OsStr::new("compact.exe"));
-    let verb = wide(std::ffi::OsStr::new("runas"));
-    let mut params = String::new();
-    for (i, arg) in inv.args.iter().enumerate() {
-        if i > 0 {
-            params.push(' ');
-        }
-        let s = arg.to_string_lossy();
-        if s.chars().any(|c| c.is_whitespace()) {
-            params.push('"');
-            params.push_str(&s);
-            params.push('"');
-        } else {
-            params.push_str(&s);
-        }
-    }
-    let params_w = wide(std::ffi::OsStr::new(&params));
-    let mut info = SHELLEXECUTEINFOW {
-        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-        fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
-        lpVerb: PCWSTR(verb.as_ptr()),
-        lpFile: PCWSTR(file.as_ptr()),
-        lpParameters: PCWSTR(params_w.as_ptr()),
-        nShow: SW_HIDE.0 as i32,
-        ..Default::default()
-    };
-    let ok = unsafe { ShellExecuteExW(&mut info) };
-    if ok.is_err() {
-        return Err("Could not elevate compact.exe (UAC cancelled or failed).".into());
-    }
-    if !info.hProcess.is_invalid() {
-        unsafe {
-            let _ = WaitForSingleObject(info.hProcess, 30 * 60 * 1000);
-            let _ = CloseHandle(info.hProcess);
-        }
-    }
-    Ok(CommandOutput {
-        status_ok: true,
-        stdout: String::new(),
-        stderr: String::new(),
-        code: Some(0),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::compact::build_compact_command;
     use crate::compact::command::{is_lznt1_command, is_wof_exe_command};
+    use crate::compact::wof;
 
     #[test]
     fn windows_apps_paths_are_refused() {
@@ -1001,7 +611,7 @@ mod tests {
         let err = preflight(&install, false).unwrap_err();
         assert_eq!(err, CompactRefuse::SteamUpdating { app_id: 99 });
 
-        COMPACT_SPAWN_COUNT.with(|c| c.set(0));
+        wof::test_set_ops(0);
         let apply_err = apply_compact(
             CompactOp::Compress,
             &install,
@@ -1015,7 +625,7 @@ mod tests {
             "apply must refuse before compact.exe: {apply_err}"
         );
         assert_eq!(
-            COMPACT_SPAWN_COUNT.with(|c| c.get()),
+            wof::test_op_count(),
             0,
             "compact.exe must not spawn when Steam is updating"
         );
@@ -1054,7 +664,7 @@ mod tests {
             preflight(&install, false).unwrap_err(),
             CompactRefuse::SteamUpdating { app_id: 1026 }
         );
-        COMPACT_SPAWN_COUNT.with(|c| c.set(0));
+        wof::test_set_ops(0);
         assert!(apply_compact(
             CompactOp::Compress,
             &install,
@@ -1063,7 +673,7 @@ mod tests {
             |_| {},
         )
         .is_err());
-        assert_eq!(COMPACT_SPAWN_COUNT.with(|c| c.get()), 0);
+        assert_eq!(wof::test_op_count(), 0);
 
         let _ = std::fs::remove_dir_all(&library);
     }
@@ -1080,7 +690,7 @@ mod tests {
         std::fs::write(root.join("play.exe"), vec![0u8; 64]).unwrap();
         std::fs::write(root.join("rusticgu-lzx-fail.dat"), vec![0u8; 64]).unwrap();
 
-        COMPACT_SPAWN_COUNT.with(|c| c.set(0));
+        wof::test_set_ops(0);
         let result = apply_compact_allowing_lzx(
             CompactOp::Compress,
             &root,
@@ -1091,9 +701,9 @@ mod tests {
         .expect("Maximum should finish via XPRESS16K fallback, not abort the title");
         assert!(result.ok);
         assert!(
-            COMPACT_SPAWN_COUNT.with(|c| c.get()) >= 2,
+            wof::test_op_count() >= 2,
             "batch fail must retry (got {})",
-            COMPACT_SPAWN_COUNT.with(|c| c.get())
+            wof::test_op_count()
         );
 
         let _ = std::fs::remove_dir_all(&root);
