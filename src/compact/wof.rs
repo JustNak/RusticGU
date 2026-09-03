@@ -331,15 +331,22 @@ fn wof_proc(name: &std::ffi::CStr) -> windows::Win32::Foundation::FARPROC {
     use windows::Win32::Foundation::HMODULE;
     use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 
-    static MODULE: OnceLock<Option<HMODULE>> = OnceLock::new();
-    let module = MODULE.get_or_init(|| {
+    // HMODULE is a raw pointer and is not Send/Sync, so cache the address as isize.
+    static MODULE: OnceLock<isize> = OnceLock::new();
+    let raw = *MODULE.get_or_init(|| {
         let wide: Vec<u16> = std::ffi::OsStr::new("WofUtil.dll")
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        unsafe { LoadLibraryW(PCWSTR(wide.as_ptr())) }.ok()
+        match unsafe { LoadLibraryW(PCWSTR(wide.as_ptr())) } {
+            Ok(h) if !h.is_invalid() => h.0 as isize,
+            _ => 0,
+        }
     });
-    let module = (*module)?;
+    if raw == 0 {
+        return None;
+    }
+    let module = HMODULE(raw as *mut core::ffi::c_void);
     unsafe { GetProcAddress(module, PCSTR(name.as_ptr().cast())) }
 }
 
@@ -409,6 +416,7 @@ fn open_wof_handle(path: &Path) -> Result<windows::Win32::Foundation::HANDLE, Wo
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
+    clear_readonly_attribute(&wide);
     unsafe {
         CreateFileW(
             PCWSTR(wide.as_ptr()),
@@ -421,6 +429,30 @@ fn open_wof_handle(path: &Path) -> Result<windows::Win32::Foundation::HANDLE, Wo
         )
     }
     .map_err(|e| map_win32(hresult_win32(e.code().0), "CreateFileW"))
+}
+
+#[cfg(all(windows, not(test)))]
+fn clear_readonly_attribute(wide: &[u16]) {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY, FILE_FLAGS_AND_ATTRIBUTES,
+        INVALID_FILE_ATTRIBUTES,
+    };
+
+    let attrs = unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) };
+    if attrs == INVALID_FILE_ATTRIBUTES {
+        return;
+    }
+    let readonly = FILE_ATTRIBUTE_READONLY.0;
+    if attrs & readonly == 0 {
+        return;
+    }
+    let _ = unsafe {
+        SetFileAttributesW(
+            PCWSTR(wide.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(attrs & !readonly),
+        )
+    };
 }
 
 #[cfg(all(windows, not(test)))]
@@ -606,6 +638,7 @@ struct TestState {
     ops: usize,
     backing: std::collections::HashMap<String, CompactAlgorithm>,
     access_denied: std::collections::HashSet<String>,
+    always_denied: std::collections::HashSet<String>,
     sharing: std::collections::HashSet<String>,
     not_beneficial: std::collections::HashSet<String>,
     incompressible: std::collections::HashSet<String>,
@@ -690,6 +723,9 @@ fn test_compress(path: &Path, algorithm: CompactAlgorithm) -> Result<WofStatus, 
     if state.sharing.contains(&key) {
         return Err(WofError::SharingViolation);
     }
+    if state.always_denied.contains(&key) {
+        return Err(WofError::AccessDenied);
+    }
     if state.access_denied.contains(&key) && !state.elevated {
         return Err(WofError::AccessDenied);
     }
@@ -706,6 +742,9 @@ fn test_uncompress(path: &Path) -> Result<WofStatus, WofError> {
     let mut state = lock_test();
     if state.sharing.contains(&key) {
         return Err(WofError::SharingViolation);
+    }
+    if state.always_denied.contains(&key) {
+        return Err(WofError::AccessDenied);
     }
     if state.access_denied.contains(&key) && !state.elevated {
         return Err(WofError::AccessDenied);
@@ -753,6 +792,17 @@ pub fn test_set_access_denied(path: &Path, denied: bool) {
         state.access_denied.insert(key);
     } else {
         state.access_denied.remove(&key);
+    }
+}
+
+#[cfg(test)]
+pub fn test_set_always_denied(path: &Path, denied: bool) {
+    let key = path_key(path);
+    let mut state = lock_test();
+    if denied {
+        state.always_denied.insert(key);
+    } else {
+        state.always_denied.remove(&key);
     }
 }
 
@@ -849,7 +899,7 @@ mod tests {
         assert!((1..=4).contains(&n), "{n}");
         assert_eq!(worker_count(CompactAlgorithm::Xpress8k, Some(true)), 2);
         let ssd = worker_count(CompactAlgorithm::Xpress8k, Some(false));
-        assert!(ssd >= 1 && ssd <= 12);
+        assert!((1..=12).contains(&ssd));
     }
 
     #[test]

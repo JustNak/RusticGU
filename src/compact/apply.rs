@@ -131,6 +131,7 @@ pub fn apply_wof(
         match elevate_and_run(&job) {
             Ok(result) => stats.merge_job(result),
             Err(err) => {
+                stats.failed = stats.failed.saturating_add(job.files.len());
                 if !stats.any_ok() {
                     return Err(err);
                 }
@@ -227,11 +228,14 @@ pub fn run_job_files(job: &WofJob) -> WofJobResult {
         workers,
         &mut |_| {},
     );
+    let leftover = stats.denied.len();
     WofJobResult {
         ok: stats.ok,
-        failed: stats.failed,
+        failed: stats.failed.saturating_add(leftover),
         skipped: stats.skipped,
-        last_error: stats.last_error,
+        last_error: stats
+            .last_error
+            .or_else(|| (leftover > 0).then(|| "Access is denied.".into())),
     }
 }
 
@@ -241,7 +245,7 @@ fn elevate_and_run(job: &WofJob) -> Result<WofJobResult, String> {
         super::wof::test_set_elevated(true);
         let result = run_job_files(job);
         super::wof::test_set_elevated(false);
-        return Ok(result);
+        Ok(result)
     }
     #[cfg(all(windows, not(test)))]
     {
@@ -469,7 +473,7 @@ fn process_compress(
             }
         }
     }
-    if looks_incompressible(path, algorithm, CompactOp::Compress) {
+    if looks_incompressible(path, algorithm, CompactOp::Compress) && !force {
         return (FileOutcome::Skipped, None);
     }
     match compress_file(path, algorithm) {
@@ -817,6 +821,66 @@ mod tests {
                 .unwrap();
         assert!(parsed.ok >= 1);
         assert_eq!(parsed.failed, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn leftover_elevated_denials_are_failures() {
+        wof::test_reset();
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-sticky-acl-{}-{}",
+            std::process::id(),
+            stamp()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let play = root.join("play.exe");
+        std::fs::write(&play, vec![0u8; 64]).unwrap();
+        wof::test_set_always_denied(&play, true);
+        let err = apply_wof(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Xpress8k,
+            false,
+            None,
+            false,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            err.to_ascii_lowercase().contains("denied"),
+            "still-denied files must not report compact success: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn force_rewrites_incompressible_files() {
+        wof::test_reset();
+        let root = std::env::temp_dir().join(format!(
+            "rusticgu-force-probe-{}-{}",
+            std::process::id(),
+            stamp()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let blob = root.join("huge.dat");
+        std::fs::write(&blob, vec![0u8; 64]).unwrap();
+        wof::test_set_incompressible(&blob, true);
+        wof::test_set_backing(&blob, Some(CompactAlgorithm::Lzx));
+        wof::test_set_ops(0);
+        apply_wof(
+            CompactOp::Compress,
+            &root,
+            CompactAlgorithm::Xpress8k,
+            false,
+            None,
+            true,
+            |_| {},
+        )
+        .unwrap();
+        assert!(
+            wof::test_op_count() >= 1,
+            "Change-method must still rewrite incompressible files"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
