@@ -41,6 +41,10 @@ use window_placement::center_window;
 fn main() {
     set_app_user_model_id();
 
+    if let Some(code) = crate::compact::maybe_run_wof_job_cli() {
+        std::process::exit(code);
+    }
+
     if claim_instance() == InstanceRole::Secondary {
         return;
     }

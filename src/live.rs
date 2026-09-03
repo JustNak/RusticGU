@@ -405,6 +405,9 @@ fn apply_live_plan(
 }
 
 fn file_compact_state(path: &Path) -> FileCompactState {
+    if crate::compact::wof::detect(path).ok().flatten().is_some() {
+        return FileCompactState::Compressed;
+    }
     #[cfg(windows)]
     {
         windows_file_compact_state(path)

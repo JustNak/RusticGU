@@ -139,10 +139,23 @@ pub fn skip_reason(path: &Path) -> Option<SkipReason> {
     if extension_is_skipped(path) {
         return Some(SkipReason::Extension);
     }
-    if packed_media_container(path) || file_has_incompressible_media_magic(path) {
+    if packed_media_container(path) {
+        return Some(SkipReason::PackedMedia);
+    }
+    if should_magic_peek(path) && file_has_incompressible_media_magic(path) {
         return Some(SkipReason::PackedMedia);
     }
     None
+}
+
+/// Magic-byte peeks are only worth it on game-data containers and extensionless
+/// files. `.exe` / `.dll` / `.dat` headers are not compressed media.
+fn should_magic_peek(path: &Path) -> bool {
+    match extension_lower(path) {
+        Some(ext) if MEDIA_CONTAINER_EXTS.iter().any(|s| *s == ext) => true,
+        Some(_) => false,
+        None => true,
+    }
 }
 
 /// True when this is a game-data container named as packed video/audio.
@@ -285,22 +298,20 @@ pub fn auto_excluded_title(path: &Path) -> Option<String> {
     })
 }
 
+fn is_dstorage_filename(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| DSTORAGE_FILENAMES.iter().any(|t| n.eq_ignore_ascii_case(t)))
+        .unwrap_or(false)
+}
+
 /// DirectStorage runtime in the tree. Compacting this install can break IO.
 pub fn tree_contains_dstorage(root: &Path) -> bool {
-    contains_any_file_named(root, DSTORAGE_FILENAMES)
+    collect_inventory(root).has_dstorage
 }
 
-fn contains_any_file_named(root: &Path, targets: &[&str]) -> bool {
-    walk_all_files(root, 12).into_iter().any(|path| {
-        path.file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| targets.iter().any(|t| n.eq_ignore_ascii_case(t)))
-            .unwrap_or(false)
-    })
-}
-
-/// Walk files without applying the skip-dir prune (used to find DirectStorage DLLs).
-fn walk_all_files(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
+/// Walk every file (skip-dir prune off). Used to find WOF-backed files on uncompact.
+pub(crate) fn walk_all_files(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     fn rec(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<std::path::PathBuf>) {
         if depth > max_depth {
@@ -325,38 +336,72 @@ fn walk_all_files(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
 /// Same include set for dry-run/estimate and the real WOF apply pass.
 pub const COMPACT_WALK_DEPTH: usize = 24;
 
-/// Files the WOF pass may touch: skip-list directories pruned, skip extensions dropped.
-pub fn collect_included_files(root: &Path) -> Vec<std::path::PathBuf> {
-    walkdir_limited(root, COMPACT_WALK_DEPTH)
-        .into_iter()
-        .filter(|path| !should_skip(path))
-        .collect()
+/// One walk: include-set, skip counts, logical size, DirectStorage filenames.
+#[derive(Debug, Clone, Default)]
+pub struct CompactInventory {
+    pub included: Vec<std::path::PathBuf>,
+    /// Files seen in non-skip directories (included + skip-list files).
+    pub walked_count: usize,
+    pub logical_bytes: u64,
+    pub has_dstorage: bool,
 }
 
-/// Bounded walk so tests and dry-run stay cheap. Production compact also uses this.
-pub fn walkdir_limited(root: &Path, max_depth: usize) -> Vec<std::path::PathBuf> {
-    let mut out = Vec::new();
-    fn rec(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<std::path::PathBuf>) {
-        if depth > max_depth {
-            return;
+impl CompactInventory {
+    pub fn skipped_count(&self) -> usize {
+        self.walked_count.saturating_sub(self.included.len())
+    }
+}
+
+/// Files the WOF pass may touch: skip-list directories pruned, skip extensions dropped.
+pub fn collect_included_files(root: &Path) -> Vec<std::path::PathBuf> {
+    collect_inventory(root).included
+}
+
+/// Single include-set walk used by estimate, apply, and dstorage detection.
+pub fn collect_inventory(root: &Path) -> CompactInventory {
+    let mut inv = CompactInventory::default();
+    walk_inventory(root, 0, COMPACT_WALK_DEPTH, true, &mut inv);
+    inv
+}
+
+fn walk_inventory(
+    dir: &Path,
+    depth: usize,
+    max_depth: usize,
+    count_files: bool,
+    inv: &mut CompactInventory,
+) {
+    if depth > max_depth {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if is_dstorage_filename(&path) {
+            inv.has_dstorage = true;
         }
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path_has_skipped_dir(&path) {
+        let is_dir = path.is_dir();
+        if path_has_skipped_dir(&path) {
+            if is_dir {
+                walk_inventory(&path, depth + 1, max_depth, false, inv);
+            }
+            continue;
+        }
+        if is_dir {
+            walk_inventory(&path, depth + 1, max_depth, count_files, inv);
+        } else if count_files {
+            inv.walked_count = inv.walked_count.saturating_add(1);
+            if should_skip(&path) {
                 continue;
             }
-            if path.is_dir() {
-                rec(&path, depth + 1, max_depth, out);
-            } else {
-                out.push(path);
+            if let Ok(meta) = std::fs::metadata(&path) {
+                inv.logical_bytes = inv.logical_bytes.saturating_add(meta.len());
             }
+            inv.included.push(path);
         }
     }
-    rec(root, 0, max_depth, &mut out);
-    out
 }
 
 #[cfg(test)]
@@ -610,18 +655,32 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("rusticgu-magic-{}-{}", std::process::id(), stamp));
         std::fs::create_dir_all(&dir).unwrap();
-        let mp4 = dir.join("clip.bin");
-        let mut bytes = vec![0u8; 16];
-        bytes[4..8].copy_from_slice(b"ftyp");
-        std::fs::write(&mp4, bytes).unwrap();
-        let ogg = dir.join("track.bin");
-        std::fs::write(&ogg, b"OggS........").unwrap();
+        let mut ftyp = vec![0u8; 16];
+        ftyp[4..8].copy_from_slice(b"ftyp");
+        let bundle = dir.join("clip.bundle");
+        std::fs::write(&bundle, &ftyp).unwrap();
+        let nameless = dir.join("track");
+        std::fs::write(&nameless, b"OggS........").unwrap();
         let plain = dir.join("level.dat");
         std::fs::write(&plain, b"not media!!").unwrap();
+        let exe = dir.join("game.exe");
+        std::fs::write(&exe, &ftyp).unwrap();
+        let dll = dir.join("engine.dll");
+        std::fs::write(&dll, b"OggS........").unwrap();
 
-        assert_eq!(skip_reason(&mp4), Some(SkipReason::PackedMedia));
-        assert_eq!(skip_reason(&ogg), Some(SkipReason::PackedMedia));
+        assert_eq!(skip_reason(&bundle), Some(SkipReason::PackedMedia));
+        assert_eq!(skip_reason(&nameless), Some(SkipReason::PackedMedia));
         assert!(skip_reason(&plain).is_none());
+        assert!(
+            skip_reason(&exe).is_none(),
+            "must not magic-peek .exe: {:?}",
+            skip_reason(&exe)
+        );
+        assert!(
+            skip_reason(&dll).is_none(),
+            "must not magic-peek .dll: {:?}",
+            skip_reason(&dll)
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
