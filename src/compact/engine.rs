@@ -611,7 +611,7 @@ mod tests {
         let err = preflight(&install, false).unwrap_err();
         assert_eq!(err, CompactRefuse::SteamUpdating { app_id: 99 });
 
-        wof::test_set_ops(0);
+        let _wof_stub = wof::test_reset();
         let apply_err = apply_compact(
             CompactOp::Compress,
             &install,
@@ -664,7 +664,7 @@ mod tests {
             preflight(&install, false).unwrap_err(),
             CompactRefuse::SteamUpdating { app_id: 1026 }
         );
-        wof::test_set_ops(0);
+        let _wof_stub = wof::test_reset();
         assert!(apply_compact(
             CompactOp::Compress,
             &install,
@@ -690,7 +690,7 @@ mod tests {
         std::fs::write(root.join("play.exe"), vec![0u8; 64]).unwrap();
         std::fs::write(root.join("rusticgu-lzx-fail.dat"), vec![0u8; 64]).unwrap();
 
-        wof::test_set_ops(0);
+        let _wof_stub = wof::test_reset();
         let result = apply_compact_allowing_lzx(
             CompactOp::Compress,
             &root,

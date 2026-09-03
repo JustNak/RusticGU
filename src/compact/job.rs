@@ -4,7 +4,7 @@
 //! relaunches itself with `runas` so UAC happens only after ACCESS_DENIED.
 //! The worker never walks arbitrary trees: every path must sit under `root`.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -66,16 +66,111 @@ pub fn result_path_for_job(job_path: &Path) -> PathBuf {
 }
 
 pub fn path_is_under_root(path: &Path, root: &Path) -> bool {
-    let p = normalize_key(path);
-    let r = normalize_key(root);
-    p == r || p.starts_with(&format!("{r}/"))
+    let Some(path_comps) = resolved_components(path) else {
+        return false;
+    };
+    let Some(root_comps) = resolved_components(root) else {
+        return false;
+    };
+    components_under(&path_comps, &root_comps)
 }
 
-fn normalize_key(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_ascii_lowercase()
+/// Resolve `.` / `..` lexically. When a prefix of the path exists, canonicalize
+/// it so junctions and symlinks that leave `root` are rejected.
+fn resolved_components(path: &Path) -> Option<Vec<String>> {
+    let mut current = path.to_path_buf();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        if let Ok(canon) = std::fs::canonicalize(&current) {
+            let mut comps = lexical_components(&strip_verbatim(&canon))?;
+            tail.reverse();
+            for part in tail {
+                let name = part.to_string_lossy();
+                match name.as_ref() {
+                    "." => {}
+                    ".." => {
+                        if !pop_normal(&mut comps) {
+                            return None;
+                        }
+                    }
+                    _ => comps.push(name.to_ascii_lowercase()),
+                }
+            }
+            return Some(comps);
+        }
+        match (
+            current.file_name().map(|n| n.to_os_string()),
+            current.parent(),
+        ) {
+            (Some(name), Some(parent)) if parent.as_os_str() != current.as_os_str() => {
+                tail.push(name);
+                current = parent.to_path_buf();
+            }
+            _ => return lexical_components(path),
+        }
+    }
+}
+
+fn strip_verbatim(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        if let Some(unc) = rest.strip_prefix("UNC\\") {
+            return PathBuf::from(format!(r"\\{unc}"));
+        }
+        return PathBuf::from(rest);
+    }
+    if let Some(rest) = s.strip_prefix("//?/") {
+        if let Some(unc) = rest.strip_prefix("UNC/") {
+            return PathBuf::from(format!("//{unc}"));
+        }
+        return PathBuf::from(rest);
+    }
+    path.to_path_buf()
+}
+
+fn lexical_components(path: &Path) -> Option<Vec<String>> {
+    let unified = path.to_string_lossy().replace('\\', "/");
+    let path = Path::new(&unified);
+    let mut out: Vec<String> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                out.push(
+                    prefix
+                        .as_os_str()
+                        .to_string_lossy()
+                        .replace('\\', "/")
+                        .to_ascii_lowercase(),
+                );
+            }
+            Component::RootDir => out.push("/".into()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !pop_normal(&mut out) {
+                    return None;
+                }
+            }
+            Component::Normal(name) => {
+                out.push(name.to_string_lossy().to_ascii_lowercase());
+            }
+        }
+    }
+    Some(out)
+}
+
+fn pop_normal(comps: &mut Vec<String>) -> bool {
+    match comps.last().map(String::as_str) {
+        None | Some("/") => false,
+        Some(s) if s.ends_with(':') => false,
+        _ => {
+            comps.pop();
+            true
+        }
+    }
+}
+
+fn components_under(path: &[String], root: &[String]) -> bool {
+    path.len() >= root.len() && path.iter().zip(root.iter()).all(|(a, b)| a == b)
 }
 
 pub fn validate_job(job: &WofJob) -> Result<(), String> {
@@ -142,6 +237,10 @@ mod tests {
         let root = Path::new(r"D:\SteamLibrary\steamapps\common\Foo");
         assert!(path_is_under_root(&root.join("bin").join("game.exe"), root));
         assert!(path_is_under_root(root, root));
+        assert!(path_is_under_root(
+            Path::new(r"D:\SteamLibrary\steamapps\common\Foo\bin\..\play.exe"),
+            root
+        ));
         assert!(!path_is_under_root(
             Path::new(r"D:\Windows\System32\cmd.exe"),
             root
@@ -150,6 +249,58 @@ mod tests {
             Path::new(r"D:\SteamLibrary\steamapps\common\FooExtra\x.exe"),
             root
         ));
+        assert!(
+            !path_is_under_root(
+                Path::new(r"D:\SteamLibrary\steamapps\common\Foo\..\Bar\x.exe"),
+                root
+            ),
+            "lexical .. must not escape the install root"
+        );
+        assert!(!path_is_under_root(
+            &root.join("..").join("Bar").join("x.exe"),
+            root
+        ));
+    }
+
+    #[test]
+    fn symlink_or_junction_escape_is_rejected() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = std::env::temp_dir().join(format!(
+            "rusticgu-job-symlink-{}-{}",
+            std::process::id(),
+            stamp
+        ));
+        let root = tmp.join("root");
+        let outside = tmp.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let secret = outside.join("secret.bin");
+        std::fs::write(&secret, b"x").unwrap();
+        let link = root.join("escape");
+        let linked = {
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(&outside, &link).is_ok()
+            }
+            #[cfg(windows)]
+            {
+                std::os::windows::fs::symlink_dir(&outside, &link).is_ok()
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                false
+            }
+        };
+        if linked {
+            assert!(
+                !path_is_under_root(&link.join("secret.bin"), &root),
+                "reparse points that leave the install root must be rejected"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

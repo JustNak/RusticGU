@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn same_algorithm_is_skipped_unless_force() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root = std::env::temp_dir().join(format!(
             "rusticgu-same-algo-{}-{}",
             std::process::id(),
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn tiny_files_are_skipped_when_cluster_is_4k() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         wof::test_set_cluster(Some(4096));
         let root =
             std::env::temp_dir().join(format!("rusticgu-tiny-{}-{}", std::process::id(), stamp()));
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn not_beneficial_counts_as_ok() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root =
             std::env::temp_dir().join(format!("rusticgu-nb-{}-{}", std::process::id(), stamp()));
         std::fs::create_dir_all(&root).unwrap();
@@ -613,7 +613,7 @@ mod tests {
 
     #[test]
     fn one_hard_failure_does_not_abort_the_title() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root =
             std::env::temp_dir().join(format!("rusticgu-surv-{}-{}", std::process::id(), stamp()));
         std::fs::create_dir_all(&root).unwrap();
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn uncompact_targets_only_wof_backed_files() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root =
             std::env::temp_dir().join(format!("rusticgu-un-{}-{}", std::process::id(), stamp()));
         std::fs::create_dir_all(&root).unwrap();
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn incompressible_probe_skips_without_wof() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root =
             std::env::temp_dir().join(format!("rusticgu-probe-{}-{}", std::process::id(), stamp()));
         std::fs::create_dir_all(&root).unwrap();
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn access_denied_retries_elevated() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root =
             std::env::temp_dir().join(format!("rusticgu-acl-{}-{}", std::process::id(), stamp()));
         std::fs::create_dir_all(&root).unwrap();
@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn sharing_violation_skips_and_does_not_abort() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root =
             std::env::temp_dir().join(format!("rusticgu-share-{}-{}", std::process::id(), stamp()));
         std::fs::create_dir_all(&root).unwrap();
@@ -757,7 +757,7 @@ mod tests {
     fn native_uncompact_does_not_use_recursive_s() {
         use crate::compact::command::{build_apply_invocations, invocation_recurses_install_root};
 
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root = std::env::temp_dir().join(format!(
             "rusticgu-native-un-{}-{}",
             std::process::id(),
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn wof_job_file_writes_result_and_exit_zero() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root = std::env::temp_dir().join(format!(
             "rusticgu-jobfile-{}-{}",
             std::process::id(),
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn leftover_elevated_denials_are_failures() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root = std::env::temp_dir().join(format!(
             "rusticgu-sticky-acl-{}-{}",
             std::process::id(),
@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn force_rewrites_incompressible_files() {
-        wof::test_reset();
+        let _wof_stub = wof::test_reset();
         let root = std::env::temp_dir().join(format!(
             "rusticgu-force-probe-{}-{}",
             std::process::id(),

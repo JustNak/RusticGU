@@ -402,7 +402,27 @@ fn windows_detect(path: &Path) -> Result<Option<CompactAlgorithm>, WofError> {
 }
 
 #[cfg(all(windows, not(test)))]
-fn open_wof_handle(path: &Path) -> Result<windows::Win32::Foundation::HANDLE, WofError> {
+struct WofFile {
+    handle: windows::Win32::Foundation::HANDLE,
+    wide: Vec<u16>,
+    restore_readonly: bool,
+}
+
+#[cfg(all(windows, not(test)))]
+impl Drop for WofFile {
+    fn drop(&mut self) {
+        use windows::Win32::Foundation::CloseHandle;
+        unsafe {
+            let _ = CloseHandle(self.handle);
+        }
+        if self.restore_readonly {
+            restore_readonly_attribute(&self.wide);
+        }
+    }
+}
+
+#[cfg(all(windows, not(test)))]
+fn open_wof_file(path: &Path) -> Result<WofFile, WofError> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
@@ -416,8 +436,8 @@ fn open_wof_handle(path: &Path) -> Result<windows::Win32::Foundation::HANDLE, Wo
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    clear_readonly_attribute(&wide);
-    unsafe {
+    let restore_readonly = clear_readonly_attribute(&wide);
+    match unsafe {
         CreateFileW(
             PCWSTR(wide.as_ptr()),
             (GENERIC_READ.0 | GENERIC_WRITE.0) as u32,
@@ -427,12 +447,48 @@ fn open_wof_handle(path: &Path) -> Result<windows::Win32::Foundation::HANDLE, Wo
             FILE_ATTRIBUTE_NORMAL,
             None,
         )
+    } {
+        Ok(handle) => Ok(WofFile {
+            handle,
+            wide,
+            restore_readonly,
+        }),
+        Err(e) => {
+            if restore_readonly {
+                restore_readonly_attribute(&wide);
+            }
+            Err(map_win32(hresult_win32(e.code().0), "CreateFileW"))
+        }
     }
-    .map_err(|e| map_win32(hresult_win32(e.code().0), "CreateFileW"))
 }
 
 #[cfg(all(windows, not(test)))]
-fn clear_readonly_attribute(wide: &[u16]) {
+fn clear_readonly_attribute(wide: &[u16]) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY, FILE_FLAGS_AND_ATTRIBUTES,
+        INVALID_FILE_ATTRIBUTES,
+    };
+
+    let attrs = unsafe { GetFileAttributesW(PCWSTR(wide.as_ptr())) };
+    if attrs == INVALID_FILE_ATTRIBUTES {
+        return false;
+    }
+    let readonly = FILE_ATTRIBUTE_READONLY.0;
+    if attrs & readonly == 0 {
+        return false;
+    }
+    unsafe {
+        SetFileAttributesW(
+            PCWSTR(wide.as_ptr()),
+            FILE_FLAGS_AND_ATTRIBUTES(attrs & !readonly),
+        )
+    }
+    .is_ok()
+}
+
+#[cfg(all(windows, not(test)))]
+fn restore_readonly_attribute(wide: &[u16]) {
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
         GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_READONLY, FILE_FLAGS_AND_ATTRIBUTES,
@@ -444,43 +500,44 @@ fn clear_readonly_attribute(wide: &[u16]) {
         return;
     }
     let readonly = FILE_ATTRIBUTE_READONLY.0;
-    if attrs & readonly == 0 {
+    if attrs & readonly != 0 {
         return;
     }
     let _ = unsafe {
         SetFileAttributesW(
             PCWSTR(wide.as_ptr()),
-            FILE_FLAGS_AND_ATTRIBUTES(attrs & !readonly),
+            FILE_FLAGS_AND_ATTRIBUTES(attrs | readonly),
         )
     };
 }
 
 #[cfg(all(windows, not(test)))]
 fn windows_compress(path: &Path, algorithm: CompactAlgorithm) -> Result<WofStatus, WofError> {
-    use windows::Win32::Foundation::{CloseHandle, HANDLE};
-
-    type WofSetFn = unsafe extern "system" fn(HANDLE, u32, *const core::ffi::c_void, u32) -> i32;
+    type WofSetFn = unsafe extern "system" fn(
+        windows::Win32::Foundation::HANDLE,
+        u32,
+        *const core::ffi::c_void,
+        u32,
+    ) -> i32;
 
     let Some(proc) = wof_proc(c"WofSetFileDataLocation") else {
         return Err(WofError::Failed("WofUtil.dll is unavailable.".into()));
     };
     let func: WofSetFn = unsafe { std::mem::transmute(proc) };
-    let handle = open_wof_handle(path)?;
+    let file = open_wof_file(path)?;
     let info = WofFileCompressionInfoV1 {
         algorithm: algorithm_provider_id(algorithm),
         flags: 0,
     };
     let hr = unsafe {
         func(
-            handle,
+            file.handle,
             WOF_PROVIDER_FILE,
             (&info as *const WofFileCompressionInfoV1).cast(),
             std::mem::size_of::<WofFileCompressionInfoV1>() as u32,
         )
     };
-    unsafe {
-        let _ = CloseHandle(handle);
-    }
+    drop(file);
     if hr >= 0 {
         return Ok(WofStatus::Applied);
     }
@@ -493,14 +550,13 @@ fn windows_compress(path: &Path, algorithm: CompactAlgorithm) -> Result<WofStatu
 
 #[cfg(all(windows, not(test)))]
 fn windows_uncompress(path: &Path) -> Result<WofStatus, WofError> {
-    use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::IO::DeviceIoControl;
 
-    let handle = open_wof_handle(path)?;
+    let file = open_wof_file(path)?;
     let mut returned = 0u32;
     let result = unsafe {
         DeviceIoControl(
-            handle,
+            file.handle,
             FSCTL_DELETE_EXTERNAL_BACKING,
             None,
             0,
@@ -510,9 +566,7 @@ fn windows_uncompress(path: &Path) -> Result<WofStatus, WofError> {
             None,
         )
     };
-    unsafe {
-        let _ = CloseHandle(handle);
-    }
+    drop(file);
     match result {
         Ok(()) => Ok(WofStatus::Applied),
         Err(e) => {
@@ -648,32 +702,45 @@ struct TestState {
     elevated: bool,
 }
 
+/// Held for the lifetime of a WOF stub test so parallel `cargo test` threads
+/// cannot clobber shared stub state. Worker threads still share `TEST_STATE`.
 #[cfg(test)]
-use std::sync::{Mutex, OnceLock};
-
-#[cfg(test)]
-fn test_state() -> &'static Mutex<TestState> {
-    static STATE: OnceLock<Mutex<TestState>> = OnceLock::new();
-    STATE.get_or_init(|| Mutex::new(TestState::default()))
+#[must_use = "keep this guard alive for the whole test"]
+pub struct WofStubGuard {
+    _serial: std::sync::MutexGuard<'static, ()>,
 }
 
 #[cfg(test)]
+static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
+static TEST_STATE: std::sync::LazyLock<std::sync::Mutex<TestState>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(TestState::default()));
+
+#[cfg(test)]
 fn lock_test() -> std::sync::MutexGuard<'static, TestState> {
-    test_state().lock().unwrap_or_else(|e| e.into_inner())
+    TEST_STATE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+#[cfg(test)]
+fn with_test<R>(f: impl FnOnce(&mut TestState) -> R) -> R {
+    let mut state = lock_test();
+    f(&mut state)
 }
 
 fn record_op() {
     #[cfg(test)]
     {
-        let mut state = lock_test();
-        state.ops = state.ops.saturating_add(1);
+        with_test(|state| {
+            state.ops = state.ops.saturating_add(1);
+        });
     }
 }
 
 fn test_cluster() -> Option<u64> {
     #[cfg(test)]
     {
-        return lock_test().cluster;
+        return with_test(|state| state.cluster);
     }
     #[cfg(not(test))]
     None
@@ -682,7 +749,7 @@ fn test_cluster() -> Option<u64> {
 fn test_seek_penalty() -> Option<bool> {
     #[cfg(test)]
     {
-        return lock_test().seek_penalty;
+        return with_test(|state| state.seek_penalty);
     }
     #[cfg(not(test))]
     None
@@ -691,7 +758,7 @@ fn test_seek_penalty() -> Option<bool> {
 fn test_is_incompressible(path: &Path) -> bool {
     #[cfg(test)]
     {
-        return lock_test().incompressible.contains(&path_key(path));
+        return with_test(|state| state.incompressible.contains(&path_key(path)));
     }
     #[cfg(not(test))]
     {
@@ -702,7 +769,7 @@ fn test_is_incompressible(path: &Path) -> bool {
 
 #[cfg(test)]
 fn test_backing(path: &Path) -> Option<CompactAlgorithm> {
-    lock_test().backing.get(&path_key(path)).copied()
+    with_test(|state| state.backing.get(&path_key(path)).copied())
 }
 
 #[cfg(test)]
@@ -713,151 +780,160 @@ fn test_compress(path: &Path, algorithm: CompactAlgorithm) -> Result<WofStatus, 
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let mut state = lock_test();
-    if name.contains("rusticgu-lzx-fail") && algorithm == CompactAlgorithm::Lzx {
-        return Err(WofError::Failed("simulated LZX failure".into()));
-    }
-    if state.hard_fail.contains(&key) {
-        return Err(WofError::Failed("simulated WOF failure".into()));
-    }
-    if state.sharing.contains(&key) {
-        return Err(WofError::SharingViolation);
-    }
-    if state.always_denied.contains(&key) {
-        return Err(WofError::AccessDenied);
-    }
-    if state.access_denied.contains(&key) && !state.elevated {
-        return Err(WofError::AccessDenied);
-    }
-    if state.not_beneficial.contains(&key) {
-        return Ok(WofStatus::NotBeneficial);
-    }
-    state.backing.insert(key, algorithm);
-    Ok(WofStatus::Applied)
+    with_test(|state| {
+        if name.contains("rusticgu-lzx-fail") && algorithm == CompactAlgorithm::Lzx {
+            return Err(WofError::Failed("simulated LZX failure".into()));
+        }
+        if state.hard_fail.contains(&key) {
+            return Err(WofError::Failed("simulated WOF failure".into()));
+        }
+        if state.sharing.contains(&key) {
+            return Err(WofError::SharingViolation);
+        }
+        if state.always_denied.contains(&key) {
+            return Err(WofError::AccessDenied);
+        }
+        if state.access_denied.contains(&key) && !state.elevated {
+            return Err(WofError::AccessDenied);
+        }
+        if state.not_beneficial.contains(&key) {
+            return Ok(WofStatus::NotBeneficial);
+        }
+        state.backing.insert(key, algorithm);
+        Ok(WofStatus::Applied)
+    })
 }
 
 #[cfg(test)]
 fn test_uncompress(path: &Path) -> Result<WofStatus, WofError> {
     let key = path_key(path);
-    let mut state = lock_test();
-    if state.sharing.contains(&key) {
-        return Err(WofError::SharingViolation);
-    }
-    if state.always_denied.contains(&key) {
-        return Err(WofError::AccessDenied);
-    }
-    if state.access_denied.contains(&key) && !state.elevated {
-        return Err(WofError::AccessDenied);
-    }
-    if state.backing.remove(&key).is_none() {
-        return Ok(WofStatus::AlreadySame);
-    }
-    Ok(WofStatus::Applied)
+    with_test(|state| {
+        if state.sharing.contains(&key) {
+            return Err(WofError::SharingViolation);
+        }
+        if state.always_denied.contains(&key) {
+            return Err(WofError::AccessDenied);
+        }
+        if state.access_denied.contains(&key) && !state.elevated {
+            return Err(WofError::AccessDenied);
+        }
+        if state.backing.remove(&key).is_none() {
+            return Ok(WofStatus::AlreadySame);
+        }
+        Ok(WofStatus::Applied)
+    })
 }
 
 #[cfg(test)]
-pub fn test_reset() {
+pub fn test_reset() -> WofStubGuard {
+    let serial = TEST_SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     *lock_test() = TestState::default();
+    WofStubGuard { _serial: serial }
 }
 
 #[cfg(test)]
 pub fn test_op_count() -> usize {
-    lock_test().ops
+    with_test(|state| state.ops)
 }
 
 #[cfg(test)]
 pub fn test_set_ops(n: usize) {
-    lock_test().ops = n;
+    with_test(|state| state.ops = n);
 }
 
 #[cfg(test)]
 pub fn test_set_backing(path: &Path, algorithm: Option<CompactAlgorithm>) {
     let key = path_key(path);
-    let mut state = lock_test();
-    match algorithm {
+    with_test(|state| match algorithm {
         Some(a) => {
             state.backing.insert(key, a);
         }
         None => {
             state.backing.remove(&key);
         }
-    }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_access_denied(path: &Path, denied: bool) {
     let key = path_key(path);
-    let mut state = lock_test();
-    if denied {
-        state.access_denied.insert(key);
-    } else {
-        state.access_denied.remove(&key);
-    }
+    with_test(|state| {
+        if denied {
+            state.access_denied.insert(key);
+        } else {
+            state.access_denied.remove(&key);
+        }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_always_denied(path: &Path, denied: bool) {
     let key = path_key(path);
-    let mut state = lock_test();
-    if denied {
-        state.always_denied.insert(key);
-    } else {
-        state.always_denied.remove(&key);
-    }
+    with_test(|state| {
+        if denied {
+            state.always_denied.insert(key);
+        } else {
+            state.always_denied.remove(&key);
+        }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_not_beneficial(path: &Path, value: bool) {
     let key = path_key(path);
-    let mut state = lock_test();
-    if value {
-        state.not_beneficial.insert(key);
-    } else {
-        state.not_beneficial.remove(&key);
-    }
+    with_test(|state| {
+        if value {
+            state.not_beneficial.insert(key);
+        } else {
+            state.not_beneficial.remove(&key);
+        }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_incompressible(path: &Path, value: bool) {
     let key = path_key(path);
-    let mut state = lock_test();
-    if value {
-        state.incompressible.insert(key);
-    } else {
-        state.incompressible.remove(&key);
-    }
+    with_test(|state| {
+        if value {
+            state.incompressible.insert(key);
+        } else {
+            state.incompressible.remove(&key);
+        }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_hard_fail(path: &Path, value: bool) {
     let key = path_key(path);
-    let mut state = lock_test();
-    if value {
-        state.hard_fail.insert(key);
-    } else {
-        state.hard_fail.remove(&key);
-    }
+    with_test(|state| {
+        if value {
+            state.hard_fail.insert(key);
+        } else {
+            state.hard_fail.remove(&key);
+        }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_sharing(path: &Path, value: bool) {
     let key = path_key(path);
-    let mut state = lock_test();
-    if value {
-        state.sharing.insert(key);
-    } else {
-        state.sharing.remove(&key);
-    }
+    with_test(|state| {
+        if value {
+            state.sharing.insert(key);
+        } else {
+            state.sharing.remove(&key);
+        }
+    });
 }
 
 #[cfg(test)]
 pub fn test_set_cluster(cluster: Option<u64>) {
-    lock_test().cluster = cluster;
+    with_test(|state| state.cluster = cluster);
 }
 
 #[cfg(test)]
 pub fn test_set_elevated(elevated: bool) {
-    lock_test().elevated = elevated;
+    with_test(|state| state.elevated = elevated);
 }
 
 #[cfg(test)]
