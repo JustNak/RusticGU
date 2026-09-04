@@ -20,10 +20,6 @@ use crate::updater::{open_release_page, open_url};
 
 /// Matches the title bar so the brand row and search chrome share one horizon.
 const SIDEBAR_BRAND_H: f32 = 48.0;
-#[cfg(target_os = "macos")]
-const SIDEBAR_BRAND_TOP_PAD: f32 = 28.0;
-#[cfg(not(target_os = "macos"))]
-const SIDEBAR_BRAND_TOP_PAD: f32 = 0.0;
 
 impl LibraryApp {
     fn render_sidebar_brand(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -111,8 +107,7 @@ impl LibraryApp {
         h_flex()
             .id("sidebar-brand")
             .w_full()
-            .h(px(SIDEBAR_BRAND_H + SIDEBAR_BRAND_TOP_PAD))
-            .pt(px(SIDEBAR_BRAND_TOP_PAD))
+            .h(px(SIDEBAR_BRAND_H))
             .px_3()
             .flex_shrink_0()
             .items_center()

@@ -8,7 +8,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::Input,
-    Icon, Sizable, StyledExt, TitleBar,
+    Icon, TitleBar,
 };
 
 use super::filter::FilterKind;
