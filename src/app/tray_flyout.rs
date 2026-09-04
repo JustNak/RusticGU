@@ -1,7 +1,7 @@
 //! Compact Proton-style tray panel: header + one primary + list + footer.
 //!
-//! QA FAIL #1: chrome-less. Use `WindowKind::PopUp`, `titlebar: None`. Do not import
-//! or apply client title-bar options. The panel paints its own header.
+//! QA FAIL #1: chrome-less. `titlebar: None`. Do not import or apply client
+//! title-bar options. The panel paints its own header.
 //! QA FAIL #2: place from `Shell_NotifyIconGetRect` + work area (see
 //! `window_placement` / `tray::anchor_from_notify_rect`).
 //! QA FAIL #3: footer **Open RusticGU** + **Exit** on the panel; Exit calls
@@ -9,23 +9,20 @@
 //!
 //! Do not wrap in `gpui_component::Root`. Root's `window_border` paints a
 //! transparent backdrop. Open from the tray event (never `LibraryApp::render`).
-
-use std::time::Instant;
+//! Do not restyle the HWND after GPUI binds DirectComposition.
 
 use gpui::{
-    div, hsla, img, prelude::FluentBuilder, px, size, AppContext, Bounds, Context,
-    InteractiveElement, IntoElement, ObjectFit, ParentElement, SharedString, Size, Styled,
-    StyledImage, Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
+    div, hsla, img, prelude::FluentBuilder, px, size, AppContext, Bounds, ClickEvent, Context,
+    FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, ObjectFit,
+    ParentElement, SharedString, Size, StatefulInteractiveElement, Styled, StyledImage, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
-use gpui_component::{
-    button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Disableable, Icon, StyledExt,
-};
+use gpui_component::{h_flex, v_flex, Icon, StyledExt};
 
 use super::LibraryApp;
-use crate::appearance::apply_window_opacity;
 use crate::branding::{APP_LOGO_DARK, APP_NAME};
 use crate::library::LibraryTitle;
+use crate::tray::TrayIconAnchor;
 use crate::window_placement::{
     place_flyout_above_tray, FLYOUT_HEIGHT_PX, FLYOUT_TASKBAR_CLEARANCE_PX, FLYOUT_WIDTH_PX,
 };
@@ -46,8 +43,11 @@ fn panel_muted() -> gpui::Hsla {
 fn panel_row() -> gpui::Hsla {
     hsla(0.62, 0.05, 0.12, 1.0)
 }
-fn panel_live() -> gpui::Hsla {
-    hsla(0.50, 0.70, 0.55, 1.0)
+fn panel_accent() -> gpui::Hsla {
+    hsla(0.51, 0.62, 0.52, 1.0)
+}
+fn panel_danger() -> gpui::Hsla {
+    hsla(0.02, 0.62, 0.62, 1.0)
 }
 
 const FLYOUT_W: f32 = FLYOUT_WIDTH_PX as f32;
@@ -55,37 +55,44 @@ const FLYOUT_H: f32 = FLYOUT_HEIGHT_PX as f32;
 
 pub struct TrayFlyout {
     app: gpui::Entity<LibraryApp>,
-    opened_at: Instant,
+    focus: FocusHandle,
+    saw_activation: bool,
 }
 
 impl TrayFlyout {
-    fn new(app: gpui::Entity<LibraryApp>) -> Self {
+    fn new(app: gpui::Entity<LibraryApp>, cx: &mut Context<Self>) -> Self {
         Self {
             app,
-            opened_at: Instant::now(),
+            focus: cx.focus_handle(),
+            saw_activation: false,
         }
+    }
+}
+
+impl Focusable for TrayFlyout {
+    fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
+        self.focus.clone()
     }
 }
 
 impl gpui::Render for TrayFlyout {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Never inherit the main window's layered glass. This panel must be solid.
         window.set_background_appearance(WindowBackgroundAppearance::Opaque);
-        apply_window_opacity(window, 0, false);
 
-        let theme = cx.theme().clone();
         let snapshot = self.app.read(cx).flyout_snapshot();
         let app = self.app.clone();
         let fg = panel_fg();
         let muted = panel_muted();
-        let live = if theme.is_dark() {
-            theme.primary
-        } else {
-            panel_live()
-        };
+        let live = panel_accent();
 
         div()
             .id("tray-flyout")
+            .track_focus(&self.focus)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    this.app.update(cx, |app, cx| app.close_flyout(cx));
+                }
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -99,24 +106,13 @@ impl gpui::Render for TrayFlyout {
                 v_flex()
                     .id("tray-flyout-body")
                     .size_full()
-                    .gap_2()
+                    .gap_3()
                     .child(render_header(&snapshot, live, fg, muted))
-                    .child(section_rule())
                     .child(render_primary(&snapshot, app.clone()))
-                    .child(section_rule())
                     .child(render_list(&snapshot, app.clone(), fg, muted))
-                    .child(section_rule())
-                    .child(render_footer(app, muted)),
+                    .child(render_footer(&snapshot, app, muted)),
             )
     }
-}
-
-fn section_rule() -> impl IntoElement {
-    div()
-        .id("tray-flyout-rule")
-        .w_full()
-        .h(px(1.))
-        .bg(panel_border())
 }
 
 fn render_header(
@@ -150,7 +146,7 @@ fn render_header(
                 ),
         )
         .child(div().text_xs().text_color(muted).child(format!(
-            "{} compact · {} inflated",
+            "{} compact · {} full size",
             snapshot.compacted, snapshot.inflated
         )))
         .child(
@@ -176,41 +172,34 @@ fn render_header(
                         .text_xs()
                         .text_color(if snapshot.live_paused { muted } else { fg })
                         .child(if snapshot.live_paused {
-                            "Live Compact paused"
+                            "Auto-compress paused"
                         } else {
-                            "Live Compact on"
+                            "Auto-compress on"
                         }),
                 ),
         )
 }
 
 fn render_primary(snapshot: &FlyoutSnapshot, app: gpui::Entity<LibraryApp>) -> impl IntoElement {
-    match snapshot.primary {
-        FlyoutPrimary::Resume => Button::new("flyout-primary")
-            .primary()
-            .w_full()
-            .icon(Icon::empty().path("icons/play.svg"))
-            .label("Resume")
-            .tooltip("Resume live compact after patches.")
-            .on_click(move |_, _, cx| {
-                app.update(cx, |app, cx| {
-                    app.toggle_live_compact(cx);
-                    app.refresh_flyout(cx);
-                });
-            }),
-        FlyoutPrimary::Compress => Button::new("flyout-primary")
-            .primary()
-            .w_full()
-            .icon(Icon::empty().path("icons/file-archive.svg"))
-            .label("Compress")
-            .disabled(snapshot.compact_busy || snapshot.inflated == 0)
-            .tooltip("Open the main window and pick Low / Medium / High.")
-            .on_click(move |_, _, cx| {
-                app.update(cx, |app, cx| {
-                    app.request_compress_from_flyout(cx);
-                });
-            }),
-    }
+    let kind = snapshot.primary;
+    let (label, disabled) = match kind {
+        FlyoutPrimary::Resume => ("Resume auto-compress", snapshot.compact_busy),
+        FlyoutPrimary::Compress => (
+            "Open to compress…",
+            snapshot.compact_busy || snapshot.inflated == 0,
+        ),
+        FlyoutPrimary::OpenLibrary => (flyout_footer_label(FlyoutFooterItem::OpenRusticGu), false),
+    };
+    flyout_fill_button("flyout-primary", label, disabled, move |_, _, cx| {
+        app.update(cx, |app, cx| match kind {
+            FlyoutPrimary::Resume => {
+                app.toggle_live_compact(cx);
+                app.refresh_flyout(cx);
+            }
+            FlyoutPrimary::Compress => app.request_compress_from_flyout(cx),
+            FlyoutPrimary::OpenLibrary => app.restore_from_flyout(cx),
+        });
+    })
 }
 
 fn render_list(
@@ -224,13 +213,19 @@ fn render_list(
         .id("tray-flyout-list")
         .w_full()
         .flex_1()
-        .min_h(px(88.))
         .gap_1()
         .when(items.is_empty(), |el| {
-            el.child(div().text_xs().text_color(muted).child("No titles yet."))
+            el.child(
+                div()
+                    .text_xs()
+                    .text_color(muted)
+                    .child("No games yet. Open RusticGU to scan."),
+            )
         })
         .children(items.into_iter().enumerate().map(|(i, item)| {
-            let app = app.clone();
+            let app_row = app.clone();
+            let app_retry = app.clone();
+            let title_id = item.id.clone();
             let can_retry = item.kind == FlyoutListKind::LastPatch && snapshot.has_last_plan;
             let busy = snapshot.compact_busy;
             h_flex()
@@ -243,6 +238,18 @@ fn render_list(
                 .py_1()
                 .rounded(px(8.))
                 .bg(panel_row())
+                .hover(|s| s.bg(panel_border()))
+                .cursor_pointer()
+                .on_click(move |_, _, cx| {
+                    app_row.update(cx, |app, cx| {
+                        if let Some(id) = &title_id {
+                            app.selected_id = Some(id.clone());
+                            app.selected_ids.clear();
+                            app.selected_ids.insert(id.clone());
+                        }
+                        app.restore_from_flyout(cx);
+                    });
+                })
                 .child(
                     v_flex()
                         .min_w_0()
@@ -253,20 +260,19 @@ fn render_list(
                         }),
                 )
                 .when(can_retry, move |el| {
-                    el.child(
-                        Button::new("flyout-retry-last")
-                            .ghost()
-                            .compact()
-                            .icon(Icon::empty().path("icons/redo-2.svg"))
-                            .label("Retry last")
-                            .disabled(busy)
-                            .on_click(move |_, _, cx| {
-                                app.update(cx, |app, cx| {
-                                    app.recompact_last_patch(cx);
-                                    app.refresh_flyout(cx);
-                                });
-                            }),
-                    )
+                    el.child(flyout_text_button(
+                        SharedString::from(format!("flyout-retry-{i}")),
+                        "Retry last",
+                        panel_accent(),
+                        busy,
+                        move |_, _, cx| {
+                            cx.stop_propagation();
+                            app_retry.update(cx, |app, cx| {
+                                app.recompact_last_patch(cx);
+                                app.refresh_flyout(cx);
+                            });
+                        },
+                    ))
                 })
         }))
 }
@@ -299,49 +305,102 @@ pub(crate) fn flyout_exit_command() -> FlyoutExitCommand {
     FlyoutExitCommand::ForceQuit
 }
 
-fn render_footer(app: gpui::Entity<LibraryApp>, muted: gpui::Hsla) -> impl IntoElement {
+fn render_footer(
+    snapshot: &FlyoutSnapshot,
+    app: gpui::Entity<LibraryApp>,
+    muted: gpui::Hsla,
+) -> impl IntoElement {
+    let show_open = snapshot.primary != FlyoutPrimary::OpenLibrary;
     h_flex()
         .id("tray-flyout-footer")
         .w_full()
         .items_center()
         .justify_between()
         .gap_2()
-        .child(
-            Button::new("flyout-open-main")
-                .ghost()
-                .compact()
-                .text_color(muted)
-                .icon(Icon::empty().path("icons/external-link.svg"))
-                .label(flyout_footer_label(FlyoutFooterItem::OpenRusticGu))
-                .on_click({
-                    let app = app.clone();
+        .child(div().id("tray-flyout-footer-open-slot").when(show_open, {
+            let app = app.clone();
+            move |el| {
+                el.child(flyout_text_button(
+                    "flyout-open-main",
+                    flyout_footer_label(FlyoutFooterItem::OpenRusticGu),
+                    muted,
+                    false,
                     move |_, _, cx| {
                         app.update(cx, |app, cx| {
                             app.restore_from_flyout(cx);
                         });
-                    }
-                }),
-        )
-        .child(
-            Button::new("flyout-exit")
-                .ghost()
-                .compact()
-                .text_color(muted)
-                .icon(Icon::empty().path("icons/window-close.svg"))
-                .label(flyout_footer_label(FlyoutFooterItem::Exit))
-                .on_click(move |_, _, cx| {
-                    debug_assert_eq!(flyout_exit_command(), FlyoutExitCommand::ForceQuit);
-                    app.update(cx, |app, cx| {
-                        app.force_quit_app(cx);
-                    });
-                }),
-        )
+                    },
+                ))
+            }
+        }))
+        .child(flyout_text_button(
+            "flyout-exit",
+            flyout_footer_label(FlyoutFooterItem::Exit),
+            panel_danger(),
+            false,
+            move |_, _, cx| {
+                debug_assert_eq!(flyout_exit_command(), FlyoutExitCommand::ForceQuit);
+                app.update(cx, |app, cx| {
+                    app.force_quit_app(cx);
+                });
+            },
+        ))
+}
+
+fn flyout_fill_button(
+    id: &'static str,
+    label: impl Into<SharedString>,
+    disabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    let accent = panel_accent();
+    div()
+        .id(id)
+        .w_full()
+        .px_2()
+        .py_2()
+        .rounded(px(8.))
+        .bg(accent)
+        .text_color(panel_bg())
+        .text_sm()
+        .font_semibold()
+        .when(!disabled, |el| {
+            el.cursor_pointer()
+                .hover(|s| s.bg(hsla(0.51, 0.62, 0.42, 1.0)))
+                .on_click(on_click)
+        })
+        .when(disabled, |el| el.opacity(0.45))
+        .child(label.into())
+}
+
+fn flyout_text_button(
+    id: impl Into<gpui::ElementId>,
+    label: impl Into<SharedString>,
+    color: gpui::Hsla,
+    disabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id)
+        .px_1()
+        .py_1()
+        .rounded(px(6.))
+        .text_xs()
+        .text_color(color)
+        .when(!disabled, |el| {
+            el.cursor_pointer()
+                .hover(|s| s.bg(panel_row()))
+                .on_click(on_click)
+        })
+        .when(disabled, |el| el.opacity(0.45))
+        .child(label.into())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FlyoutPrimary {
     Compress,
     Resume,
+    OpenLibrary,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -352,6 +411,7 @@ pub(crate) enum FlyoutListKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FlyoutListItem {
+    pub id: Option<String>,
     pub name: String,
     pub kind: FlyoutListKind,
 }
@@ -377,21 +437,21 @@ impl LibraryApp {
             live_paused: self.live.paused(),
             has_last_plan: self.live.last_plan().is_some(),
             compact_busy: self.compact_busy,
-            primary: flyout_primary(self.live.paused()),
+            primary: flyout_primary(self.live.paused(), self.games.len()),
             list: flyout_list_items(&self.games, last_patch, 3),
         }
     }
 
-    pub(crate) fn toggle_flyout(&mut self, cx: &mut Context<Self>) {
-        if self.flyout_open {
+    pub(crate) fn toggle_flyout(&mut self, anchor: Option<TrayIconAnchor>, cx: &mut Context<Self>) {
+        if self.flyout_window.is_some() {
             self.close_flyout(cx);
             return;
         }
-        self.open_flyout(cx);
+        self.open_flyout(anchor, cx);
     }
 
-    fn open_flyout(&mut self, cx: &mut Context<Self>) {
-        if self.flyout_open {
+    fn open_flyout(&mut self, anchor: Option<TrayIconAnchor>, cx: &mut Context<Self>) {
+        if self.flyout_window.is_some() {
             return;
         }
         let app = cx.entity();
@@ -402,13 +462,14 @@ impl LibraryApp {
             let app = app.clone();
             move |window, cx| {
                 window.set_background_appearance(WindowBackgroundAppearance::Opaque);
-                apply_window_opacity(window, 0, false);
-                let view = cx.new(|_cx| TrayFlyout::new(app.clone()));
+                let view = cx.new(|cx| TrayFlyout::new(app.clone(), cx));
+                view.update(cx, |this, _| {
+                    this.focus.focus(window);
+                });
                 window.on_window_should_close(cx, {
                     let app = app.clone();
                     move |_, cx| {
                         app.update(cx, |app, _| {
-                            app.flyout_open = false;
                             app.flyout_window = None;
                         });
                         true
@@ -417,9 +478,10 @@ impl LibraryApp {
                 view.update(cx, |_, cx| {
                     cx.observe_window_activation(window, |this, window, cx| {
                         if window.is_window_active() {
+                            this.saw_activation = true;
                             return;
                         }
-                        if this.opened_at.elapsed().as_millis() < 250 {
+                        if !this.saw_activation {
                             return;
                         }
                         this.app.update(cx, |app, cx| {
@@ -434,15 +496,15 @@ impl LibraryApp {
         match result {
             Ok(handle) => {
                 self.flyout_window = Some(*handle);
-                self.flyout_open = true;
-                let anchor = self
-                    .system_tray
-                    .as_ref()
-                    .and_then(|tray| tray.icon_anchor())
+                let anchor = anchor
+                    .or_else(|| {
+                        self.system_tray
+                            .as_ref()
+                            .and_then(|tray| tray.icon_anchor())
+                    })
                     .or_else(crate::tray::cursor_anchor);
                 let _ = handle.update(cx, |_, window, _cx| {
                     window.set_background_appearance(WindowBackgroundAppearance::Opaque);
-                    apply_window_opacity(window, 0, false);
                     place_flyout_above_tray(
                         window,
                         anchor,
@@ -456,14 +518,12 @@ impl LibraryApp {
             }
             Err(err) => {
                 eprintln!("[rusticgu] tray flyout: {err}");
-                self.flyout_open = false;
                 self.flyout_window = None;
             }
         }
     }
 
     pub(crate) fn close_flyout(&mut self, cx: &mut Context<Self>) {
-        self.flyout_open = false;
         if let Some(handle) = self.flyout_window.take() {
             let _ = cx.update_window(handle, |_, window, _| {
                 window.remove_window();
@@ -521,19 +581,21 @@ pub(crate) fn flyout_window_options(
         titlebar: None,
         window_decorations: None,
         window_background: WindowBackgroundAppearance::Opaque,
-        kind: WindowKind::PopUp,
+        kind: WindowKind::Normal,
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
         focus: true,
-        show: true,
+        show: false,
         window_min_size: Some(size),
         ..Default::default()
     }
 }
 
-pub(crate) fn flyout_primary(live_paused: bool) -> FlyoutPrimary {
-    if live_paused {
+pub(crate) fn flyout_primary(live_paused: bool, title_count: usize) -> FlyoutPrimary {
+    if title_count == 0 {
+        FlyoutPrimary::OpenLibrary
+    } else if live_paused {
         FlyoutPrimary::Resume
     } else {
         FlyoutPrimary::Compress
@@ -563,7 +625,9 @@ pub(crate) fn flyout_list_items(
 ) -> Vec<FlyoutListItem> {
     let mut out = Vec::new();
     if let Some(name) = last_patch {
+        let id = games.iter().find(|g| g.name == name).map(|g| g.id.clone());
         out.push(FlyoutListItem {
+            id,
             name,
             kind: FlyoutListKind::LastPatch,
         });
@@ -573,6 +637,7 @@ pub(crate) fn flyout_list_items(
             continue;
         }
         out.push(FlyoutListItem {
+            id: Some(game.id.clone()),
             name: game.name.clone(),
             kind: FlyoutListKind::Title,
         });
@@ -585,6 +650,7 @@ pub(crate) fn flyout_list_items(
             continue;
         }
         out.push(FlyoutListItem {
+            id: Some(game.id.clone()),
             name: game.name.clone(),
             kind: FlyoutListKind::Title,
         });
@@ -623,8 +689,9 @@ mod tests {
 
     #[test]
     fn primary_is_resume_when_live_paused() {
-        assert_eq!(flyout_primary(true), FlyoutPrimary::Resume);
-        assert_eq!(flyout_primary(false), FlyoutPrimary::Compress);
+        assert_eq!(flyout_primary(true, 1), FlyoutPrimary::Resume);
+        assert_eq!(flyout_primary(false, 1), FlyoutPrimary::Compress);
+        assert_eq!(flyout_primary(false, 0), FlyoutPrimary::OpenLibrary);
     }
 
     #[test]
@@ -679,10 +746,29 @@ mod tests {
             opts.window_decorations.is_none(),
             "no client-decorated chrome"
         );
-        assert_eq!(opts.kind, WindowKind::PopUp);
+        assert_eq!(opts.kind, WindowKind::Normal);
+        assert!(
+            !opts.show,
+            "first show must wait until place_flyout_above_tray"
+        );
         assert!(!opts.is_resizable);
         assert!(!opts.is_movable);
         assert_eq!(opts.window_background, WindowBackgroundAppearance::Opaque);
+    }
+
+    #[test]
+    fn flyout_does_not_restyle_hwnd_from_render() {
+        let src = include_str!("tray_flyout.rs");
+        let prod = src.split("#[cfg(test)]").next().expect("prod source");
+        assert!(
+            !prod.contains("apply_window_opacity"),
+            "opacity helper SetWindowLongs a DirectComposition HWND"
+        );
+        assert_eq!(
+            prod.matches("id(\"tray-flyout-rule\")").count(),
+            0,
+            "section rules must not share one element id"
+        );
     }
 
     #[test]
