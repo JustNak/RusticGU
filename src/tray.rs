@@ -26,7 +26,7 @@ pub enum TrayEvent {
     /// Show / activate the main window.
     ShowWindow,
     /// Toggle the compact tray flyout near the notification icon.
-    ToggleFlyout,
+    ToggleFlyout { anchor: Option<TrayIconAnchor> },
     /// Fully quit the application.
     Exit,
     /// User clicked the balloon; `context_id` is the token from
@@ -570,7 +570,8 @@ mod windows_impl {
                     let notify = lparam.0 as u32;
                     match notify {
                         WM_LBUTTONUP => {
-                            send_event(hwnd, TrayEvent::ToggleFlyout);
+                            let anchor = icon_anchor(hwnd.0 as isize);
+                            send_event(hwnd, TrayEvent::ToggleFlyout { anchor });
                         }
                         WM_LBUTTONDBLCLK => {
                             send_event(hwnd, TrayEvent::ShowWindow);
@@ -680,7 +681,7 @@ mod windows_impl {
                 return;
             }
             let state = &*ptr;
-            let _ = state.event_tx.send_blocking(event);
+            let _ = state.event_tx.try_send(event);
         }
     }
 
@@ -829,6 +830,24 @@ mod tests {
     #[test]
     fn truncate_zero_is_empty() {
         assert_eq!(truncate_utf16_units("abc", 0), "");
+    }
+
+    #[test]
+    fn tray_toggle_posts_anchor_without_blocking_wndproc() {
+        let src = include_str!("tray.rs");
+        let prod = src.split("#[cfg(test)]").next().expect("prod source");
+        assert!(
+            prod.contains("ToggleFlyout {"),
+            "left-click must send the notify-icon rect captured on the tray thread"
+        );
+        assert!(
+            prod.contains("try_send"),
+            "WndProc must not send_blocking while opening a window"
+        );
+        assert!(
+            !prod.contains("send_blocking"),
+            "send_blocking from WndProc stalls the tray message loop"
+        );
     }
 
     #[test]

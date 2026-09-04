@@ -12,7 +12,7 @@ use crate::tray::TrayIconAnchor;
 
 /// Logical size of the tray flyout panel.
 pub const FLYOUT_WIDTH_PX: i32 = 320;
-pub const FLYOUT_HEIGHT_PX: i32 = 412;
+pub const FLYOUT_HEIGHT_PX: i32 = 320;
 /// Gap between the panel bottom and the tray-icon top.
 pub const FLYOUT_ICON_GAP_PX: i32 = 12;
 /// Extra inset from `rcWork` so a tall / auto-hide taskbar cannot clip the panel.
@@ -400,10 +400,7 @@ fn place_flyout_hwnd(
         GetMonitorInfoW, MonitorFromPoint, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, GetWindowLongW, SetForegroundWindow, SetWindowLongW, SetWindowPos,
-        ShowWindow, GWL_EXSTYLE, GWL_STYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_SHOWWINDOW,
-        SW_SHOWNA, WS_CAPTION, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_LAYERED,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_THICKFRAME, WS_VISIBLE,
+        GetCursorPos, SetForegroundWindow, SetWindowPos, HWND_TOPMOST, SWP_SHOWWINDOW,
     };
 
     unsafe {
@@ -411,13 +408,6 @@ fn place_flyout_hwnd(
             return;
         }
 
-        let style = (WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS).0 as i32
-            & !((WS_CAPTION | WS_THICKFRAME).0 as i32);
-        SetWindowLongW(hwnd, GWL_STYLE, style);
-        let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
-        let ex =
-            (ex | WS_EX_TOOLWINDOW.0 | WS_EX_TOPMOST.0) & !WS_EX_APPWINDOW.0 & !WS_EX_LAYERED.0;
-        SetWindowLongW(hwnd, GWL_EXSTYLE, ex as i32);
         apply_flyout_hwnd_chrome(hwnd);
 
         let want_w = ((logical_width.max(1) as f32) * scale).round() as i32;
@@ -472,9 +462,8 @@ fn place_flyout_hwnd(
             y,
             width,
             height,
-            SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+            SWP_SHOWWINDOW,
         );
-        let _ = ShowWindow(hwnd, SW_SHOWNA);
         let _ = SetForegroundWindow(hwnd);
     }
 }
@@ -753,6 +742,28 @@ mod tests {
             FLYOUT_WIDTH_PX,
             FLYOUT_HEIGHT_PX,
             flyout_safe_work(monitor, work, FLYOUT_TASKBAR_CLEARANCE_PX, icon),
+        );
+    }
+
+    #[test]
+    fn flyout_placement_does_not_rewrite_hwnd_style() {
+        let src = include_str!("window_placement.rs");
+        let prod = src.split("#[cfg(test)]").next().expect("prod source");
+        assert!(
+            !prod.contains("SetWindowLongW"),
+            "must not SetWindowLong after GPUI binds DirectComposition"
+        );
+        assert!(
+            !prod.contains("SWP_FRAMECHANGED"),
+            "SWP_FRAMECHANGED nests WM_SIZE into a live swapchain"
+        );
+        assert!(
+            !prod.contains("GWL_STYLE"),
+            "must not replace GWL_STYLE on a GPUI HWND"
+        );
+        assert!(
+            !prod.contains("WS_POPUP"),
+            "must not force WS_POPUP after create"
         );
     }
 

@@ -102,10 +102,8 @@ impl LibraryApp {
                 self.close_flyout(cx);
                 cx.notify();
             }
-            TrayEvent::ToggleFlyout => {
-                // Open from the event, never from Render. A nested open_window
-                // during LibraryApp::render leaves an empty frameless HWND.
-                self.toggle_flyout(cx);
+            TrayEvent::ToggleFlyout { anchor } => {
+                self.toggle_flyout(anchor, cx);
             }
             TrayEvent::Exit => {
                 self.force_quit_app(cx);
@@ -146,9 +144,6 @@ impl LibraryApp {
             self.pending_tray_show = false;
             self.window_hidden_to_tray = false;
             show_main_window(window);
-        }
-        if self.pending_toggle_flyout {
-            self.pending_toggle_flyout = false;
         }
         if self.pending_open_compact {
             self.pending_open_compact = false;
