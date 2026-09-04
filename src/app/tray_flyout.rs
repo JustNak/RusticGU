@@ -11,6 +11,8 @@
 //! transparent backdrop. Open from the tray event (never `LibraryApp::render`).
 //! Do not restyle the HWND after GPUI binds DirectComposition.
 
+use std::time::{Duration, Instant};
+
 use gpui::{
     div, hsla, img, prelude::FluentBuilder, px, size, AppContext, Bounds, ClickEvent, Context,
     FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent, ObjectFit,
@@ -52,6 +54,15 @@ fn panel_danger() -> gpui::Hsla {
 
 const FLYOUT_W: f32 = FLYOUT_WIDTH_PX as f32;
 const FLYOUT_H: f32 = FLYOUT_HEIGHT_PX as f32;
+
+/// Tray left-click that deactivated the flyout is still toggle-off for this long.
+const FLYOUT_TOGGLE_OFF_GRACE: Duration = Duration::from_millis(400);
+
+/// False when the same tray click already closed the flyout via deactivate.
+pub(crate) fn should_reopen_flyout(last_closed_at: Option<Instant>, now: Instant) -> bool {
+    last_closed_at
+        .is_none_or(|closed| now.saturating_duration_since(closed) >= FLYOUT_TOGGLE_OFF_GRACE)
+}
 
 pub struct TrayFlyout {
     app: gpui::Entity<LibraryApp>,
@@ -447,6 +458,9 @@ impl LibraryApp {
             self.close_flyout(cx);
             return;
         }
+        if !should_reopen_flyout(self.last_flyout_closed_at, Instant::now()) {
+            return;
+        }
         self.open_flyout(anchor, cx);
     }
 
@@ -471,6 +485,7 @@ impl LibraryApp {
                     move |_, cx| {
                         app.update(cx, |app, _| {
                             app.flyout_window = None;
+                            app.last_flyout_closed_at = Some(Instant::now());
                         });
                         true
                     }
@@ -525,6 +540,7 @@ impl LibraryApp {
 
     pub(crate) fn close_flyout(&mut self, cx: &mut Context<Self>) {
         if let Some(handle) = self.flyout_window.take() {
+            self.last_flyout_closed_at = Some(Instant::now());
             let _ = cx.update_window(handle, |_, window, _| {
                 window.remove_window();
             });
@@ -685,6 +701,30 @@ mod tests {
             steam_install_dir_name: None,
             cover_url: None,
         }
+    }
+
+    #[test]
+    fn reopen_policy_treats_recent_close_as_toggle_off() {
+        let now = Instant::now();
+        assert!(
+            should_reopen_flyout(None, now),
+            "first tray click with no prior close must open"
+        );
+        assert!(
+            !should_reopen_flyout(Some(now), now),
+            "same-click deactivate must not reopen"
+        );
+        assert!(
+            !should_reopen_flyout(
+                Some(now),
+                now + FLYOUT_TOGGLE_OFF_GRACE - Duration::from_millis(1)
+            ),
+            "click still inside the toggle-off grace must not reopen"
+        );
+        assert!(
+            should_reopen_flyout(Some(now), now + FLYOUT_TOGGLE_OFF_GRACE),
+            "a later tray click must open again"
+        );
     }
 
     #[test]
