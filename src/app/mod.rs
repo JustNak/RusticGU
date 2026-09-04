@@ -29,6 +29,7 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, Render, Styled, Window, WindowBounds,
 };
 use gpui_component::{
+    h_flex,
     input::InputState,
     slider::{SliderEvent, SliderState},
     v_flex, ActiveTheme, Root,
@@ -789,21 +790,28 @@ impl Render for LibraryApp {
             .size_full()
             .bg(theme.background)
             .child(
-                v_flex().size_full().child(self.render_title_bar(cx)).child(
-                    gpui_component::h_flex()
-                        .flex_1()
-                        .min_h_0()
-                        .child(if self.filter == FilterKind::Settings {
-                            self.render_settings_sidebar(cx).into_any_element()
-                        } else {
-                            self.render_sidebar(cx).into_any_element()
-                        })
-                        .child(if self.filter == FilterKind::Settings {
-                            self.render_settings(cx).into_any_element()
-                        } else {
-                            self.render_library(cx).into_any_element()
-                        }),
-                ),
+                h_flex()
+                    .size_full()
+                    .child(if self.filter == FilterKind::Settings {
+                        self.render_settings_sidebar(cx).into_any_element()
+                    } else {
+                        self.render_sidebar(cx).into_any_element()
+                    })
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .h_full()
+                            .child(self.render_title_bar(cx))
+                            .child(div().flex_1().min_h_0().min_w_0().child(
+                                if self.filter == FilterKind::Settings {
+                                    self.render_settings(cx).into_any_element()
+                                } else {
+                                    self.render_library(cx).into_any_element()
+                                },
+                            )),
+                    ),
             )
             .when(vignette, |el| {
                 el.child(render_vignette_overlay(

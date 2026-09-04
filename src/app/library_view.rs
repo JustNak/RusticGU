@@ -40,10 +40,7 @@ impl LibraryApp {
         let progress_style = self.settings.progress_style;
         let busy = self.compact_busy || self.compact_flow.is_some();
         let filter = self.filter;
-        let selected_n = self.selected_titles().len();
         let shown = games.len();
-        let total = self.games.len();
-        let live_paused = self.live.paused();
         let live = self.live.clone();
         let heading = match filter {
             FilterKind::Compacted => "Compacted",
@@ -51,14 +48,16 @@ impl LibraryApp {
             FilterKind::Store(store) => store.badge(),
             _ => "Library",
         };
-        let count_label = if scanning {
-            "Scanning launchers…".to_string()
-        } else if selected_n > 1 {
-            format!("{selected_n} selected · {shown} shown")
-        } else if shown != total {
-            format!("{shown} of {total}")
-        } else {
-            format!("{total} games")
+        let heading_icon = match filter.nav_icon_path() {
+            Some(path) => Icon::empty()
+                .path(path)
+                .with_size(px(18.))
+                .text_color(theme.foreground)
+                .into_any_element(),
+            None => Icon::new(filter.nav_icon())
+                .with_size(px(18.))
+                .text_color(theme.foreground)
+                .into_any_element(),
         };
 
         let header = h_flex()
@@ -66,42 +65,14 @@ impl LibraryApp {
             .w_full()
             .flex_shrink_0()
             .items_center()
-            .justify_between()
-            .gap_3()
+            .gap_2()
+            .child(heading_icon)
             .child(
-                h_flex()
-                    .items_center()
-                    .gap_2()
-                    .child(div().w(px(8.)).h(px(8.)).rounded_full().bg(theme.primary))
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_bold()
-                            .text_color(theme.foreground)
-                            .child(heading),
-                    )
-                    .child(render_live_chip(live_paused, &theme, cx)),
-            )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(theme.muted_foreground)
-                            .child(count_label),
-                    )
-                    .child(
-                        Button::new("library-add-folder")
-                            .outline()
-                            .small()
-                            .label("Add folder")
-                            .icon(Icon::empty().path("icons/plus.svg"))
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.prompt_add_custom_game_directory(window, cx);
-                            })),
-                    ),
+                div()
+                    .text_lg()
+                    .font_bold()
+                    .text_color(theme.foreground)
+                    .child(heading),
             );
 
         let main = if games.is_empty() && scanning {
@@ -153,9 +124,11 @@ impl LibraryApp {
             .relative()
             .size_full()
             .bg(theme.background)
-            .p_5()
+            .px_5()
+            .pt_3()
+            .pb_5()
             .when(shown > 0, |el| el.pr(px(inspector_w + 20.0)))
-            .gap_4()
+            .gap_3()
             .when_some(error, |el, msg| {
                 el.child(
                     div()
@@ -273,48 +246,6 @@ impl LibraryApp {
     }
 }
 
-fn render_live_chip(
-    paused: bool,
-    theme: &gpui_component::Theme,
-    cx: &mut Context<LibraryApp>,
-) -> impl IntoElement {
-    let color = if paused {
-        theme.muted_foreground
-    } else {
-        theme.success
-    };
-    h_flex()
-        .id("library-live-chip")
-        .h(px(26.))
-        .items_center()
-        .gap_1p5()
-        .px_2()
-        .rounded(theme.radius)
-        .border_1()
-        .border_color(if paused {
-            theme.border
-        } else {
-            theme.success.opacity(0.45)
-        })
-        .cursor_pointer()
-        .hover(|s| s.bg(theme.secondary.opacity(0.55)))
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.toggle_live_compact(cx);
-        }))
-        .child(div().w(px(7.)).h(px(7.)).rounded_full().bg(color))
-        .child(
-            div()
-                .text_xs()
-                .font_semibold()
-                .text_color(color)
-                .child(if paused {
-                    "Live paused"
-                } else {
-                    "Live Compact on"
-                }),
-        )
-}
-
 fn poster_size(density: UiDensity) -> (f32, f32) {
     match density {
         UiDensity::Comfortable => (200.0, 300.0),
@@ -397,12 +328,12 @@ fn render_poster_card(
                         .absolute()
                         .inset_0()
                         .size_full()
-                        .object_fit(ObjectFit::Cover)
+                        .rounded(px(POSTER_RADIUS))
+                        .object_fit(ObjectFit::Fill)
                         .into_any_element()
                 } else {
                     render_monogram_tile(&monogram, theme.foreground).into_any_element()
                 })
-                .child(render_poster_frame_ring(selected, group.clone(), &theme))
                 .when_some(store_icon, |el, path| {
                     el.child(render_store_badge(&id, path, store_name))
                 })
@@ -420,9 +351,15 @@ fn render_poster_card(
                 })
                 .when(!show_status, |el| {
                     el.child(render_poster_veil(
-                        &id, group, hover_spec, game.store, busy, cx,
+                        &id,
+                        group.clone(),
+                        hover_spec,
+                        game.store,
+                        busy,
+                        cx,
                     ))
-                }),
+                })
+                .child(render_poster_frame_ring(selected, group, &theme)),
         )
         .child(
             v_flex()
@@ -617,6 +554,7 @@ fn render_poster_status_overlay(
         .id(SharedString::from(format!("poster-job-{id}")))
         .absolute()
         .inset_0()
+        .rounded(px(POSTER_RADIUS))
         .justify_end()
         .p_2()
         .gap_1p5()
@@ -669,6 +607,7 @@ fn render_poster_veil(
         .id(SharedString::from(format!("poster-veil-{id}")))
         .absolute()
         .inset_0()
+        .rounded(px(POSTER_RADIUS))
         .justify_end()
         .p_2()
         .gap_1p5()
