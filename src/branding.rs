@@ -48,10 +48,10 @@ pub const APP_ICON_ICO: &str = "brand/icon.ico";
 #[allow(dead_code)]
 pub const APP_ICON_PNG: &str = "brand/icon-256.png";
 
-/// Dark-theme title-bar / chrome mark (light glyph on dark field).
+/// Dark-theme sidebar / chrome mark (light glyph on dark field).
 pub const APP_LOGO_DARK: &str = "brand/logo.png";
 
-/// Light-theme title-bar / chrome mark (dark glyph on light field).
+/// Light-theme sidebar / chrome mark (dark glyph on light field).
 pub const APP_LOGO_LIGHT: &str = "brand/logo-light.png";
 
 /// Vector brand mark (crab fused with a gamepad).

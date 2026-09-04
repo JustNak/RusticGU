@@ -292,8 +292,8 @@ fn dark_charcoal(lightness: f32) -> Hsla {
 fn apply_launcher_surfaces(theme: &mut Theme) {
     if theme.is_dark() {
         theme.background = dark_charcoal(0.07);
-        theme.title_bar = dark_charcoal(0.085);
-        theme.title_bar_border = dark_charcoal(0.16);
+        theme.title_bar = dark_charcoal(0.07);
+        theme.title_bar_border = dark_charcoal(0.07);
         theme.sidebar = dark_charcoal(0.078);
         theme.sidebar_border = dark_charcoal(0.14);
         theme.muted = dark_charcoal(0.14);
@@ -317,8 +317,8 @@ fn apply_launcher_surfaces(theme: &mut Theme) {
     }
 
     theme.background = hsla(0.52, 0.18, 0.965, 1.0);
-    theme.title_bar = hsla(0.52, 0.16, 0.945, 1.0);
-    theme.title_bar_border = hsla(0.52, 0.22, 0.82, 1.0);
+    theme.title_bar = hsla(0.52, 0.18, 0.965, 1.0);
+    theme.title_bar_border = hsla(0.52, 0.18, 0.965, 1.0);
     theme.sidebar = hsla(0.52, 0.20, 0.94, 1.0);
     theme.sidebar_border = hsla(0.52, 0.14, 0.86, 1.0);
     theme.muted = hsla(0.52, 0.12, 0.90, 1.0);
